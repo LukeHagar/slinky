@@ -50,15 +50,30 @@ func WriteMarkdown(path string, results []web.Result, s Summary) (string, error)
 	var buf bytes.Buffer
 	// Title and summary
 	buf.WriteString("## Slinky Test Report\n\n")
-	buf.WriteString(fmt.Sprintf("- **Root**: %s\n", escapeMD(s.RootPath)))
-	buf.WriteString(fmt.Sprintf("- **Started**: %s\n", s.StartedAt.Format("2006-01-02 15:04:05 MST")))
-	buf.WriteString(fmt.Sprintf("- **Finished**: %s\n", s.FinishedAt.Format("2006-01-02 15:04:05 MST")))
-	buf.WriteString(fmt.Sprintf("- **Processed**: %d  •  **OK**: %d  •  **Fail**: %d\n", s.Processed, s.OK, s.Fail))
-	buf.WriteString(fmt.Sprintf("- **Rates**: avg %.1f/s  •  peak %.1f/s  •  low %.1f/s\n", s.AvgRPS, s.PeakRPS, s.LowRPS))
-	if s.JSONPath != "" {
-		base := filepath.Base(s.JSONPath)
-		buf.WriteString(fmt.Sprintf("- **JSON**: %s\n", escapeMD(base)))
+
+	// Optional root
+	if strings.TrimSpace(s.RootPath) != "." && strings.TrimSpace(s.RootPath) != "" && s.RootPath != string(filepath.Separator) {
+		buf.WriteString(fmt.Sprintf("- **Root**: %s\n", escapeMD(s.RootPath)))
 	}
+
+	// Last run and duration
+	buf.WriteString(fmt.Sprintf("- **Last Run**: %s\n", s.StartedAt.Format("2006-01-02 15:04:05 MST")))
+	dur := s.FinishedAt.Sub(s.StartedAt)
+	if dur < 0 {
+		dur = 0
+	}
+	buf.WriteString(fmt.Sprintf("- **Duration**: %s\n", dur.Truncate(time.Millisecond)))
+
+	// Totals
+	buf.WriteString(fmt.Sprintf("- **Total**: %d\n", s.Processed))
+	buf.WriteString(fmt.Sprintf("- **Pass**: %d\n", s.OK))
+	buf.WriteString(fmt.Sprintf("- **Fail**: %d\n", s.Fail))
+
+	// Rates only if non-zero
+	if !(s.AvgRPS == 0 && s.PeakRPS == 0 && s.LowRPS == 0) {
+		buf.WriteString(fmt.Sprintf("- **Rates**: avg %.1f/s  •  peak %.1f/s  •  low %.1f/s\n", s.AvgRPS, s.PeakRPS, s.LowRPS))
+	}
+
 	buf.WriteString("\n")
 
 	// Failures by URL

@@ -87,15 +87,39 @@ if [ "${COMMENT_PR_ARG}" = "true" ]; then
       echo "[slinky] GITHUB_REPOSITORY not set; skipping PR comment."
     else
       BODY_CONTENT="$(cat "${MD_OUT_ARG}")"
-      curl -sS -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+      COMMENT_BODY="<!-- slinky-report -->\n${BODY_CONTENT}"
+
+      # Try to find an existing slinky comment to update
+      COMMENTS_JSON=$(curl -sS -H "Authorization: Bearer ${GITHUB_TOKEN}" \
            -H "Accept: application/vnd.github+json" \
            -H "X-GitHub-Api-Version: 2022-11-28" \
-           -X POST "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-           -d "$(printf '{"body": %s}' "$(jq -Rs . <<EOF
-${BODY_CONTENT}
+           "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100") || COMMENTS_JSON="[]"
+
+      EXISTING_ID=$(printf '%s' "${COMMENTS_JSON}" | jq -r '[.[] | select((.body // "") | contains("<!-- slinky-report -->"))][0].id // empty')
+
+      if [ -n "${EXISTING_ID}" ]; then
+        # Update existing comment
+        curl -sS -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+             -H "Accept: application/vnd.github+json" \
+             -H "X-GitHub-Api-Version: 2022-11-28" \
+             -X PATCH "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING_ID}" \
+             -d "$(printf '{"body": %s}' "$(jq -Rs . <<EOF
+${COMMENT_BODY}
 EOF
 )" )" >/dev/null || true
-      echo "[slinky] Posted PR comment to #${PR_NUMBER}."
+        echo "[slinky] Updated existing PR comment #${EXISTING_ID}."
+      else
+        # Create new comment
+        curl -sS -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+             -H "Accept: application/vnd.github+json" \
+             -H "X-GitHub-Api-Version: 2022-11-28" \
+             -X POST "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+             -d "$(printf '{"body": %s}' "$(jq -Rs . <<EOF
+${COMMENT_BODY}
+EOF
+)" )" >/dev/null || true
+        echo "[slinky] Posted PR comment to #${PR_NUMBER}."
+      fi
     fi
   fi
 fi
