@@ -1,0 +1,15 @@
+valid:
+  - https://example.com
+  - https://docs.something.org
+  - http://example.com:8080/path
+invalid:
+  - htp://bad-protocol.com
+  - http:///too-many-slashes.com
+  - http://example..com
+  - https://
+nonexistent:
+  - https://notarealwebsite.com/page
+  - https://unregistered-website-xyz.com
+  - https://example.madeuptld
+
+

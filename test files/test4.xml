@@ -1,0 +1,7 @@
+<links>
+  <link>https://example.com</link>
+  <link>https://docs.something.org</link>
+  <link>https://github.com/example/repo</link>
+  <link>https://news.ycombinator.com</link>
+  <link>http://example.com:8080</link>
+</links>

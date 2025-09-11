@@ -1,0 +1,13 @@
+id,name,url
+1,Example,https://example.com
+2,Docs,https://docs.something.org
+3,Repo,https://github.com/example/repo
+4,HN,https://news.ycombinator.com
+5,WithPort,http://example.com:8080
+6,BadProtocol,htp://invalid-url.com
+7,ExtraSlash,http:///example.com
+8,DoubleDot,http://example..com
+9,MissingDomain,https://
+10,Nonexistent,https://this-domain-does-not-exist-123456789.com
+
+

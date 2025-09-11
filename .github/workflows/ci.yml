@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+
+      - name: Cache go build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Build
+        run: go build ./...
+
+      - name: Run unit tests
+        run: go test ./...
+
+  action-self-test:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build action image
+        run: |
+          docker build -t slinky-action -f .github/actions/slinky/Dockerfile .
+
+      - name: Run action container (expect nonzero if failures)
+        id: run_action
+        run: |
+          set -e
+          docker run --rm -v "$PWD:/repo" -w /repo -e GITHUB_STEP_SUMMARY="/tmp/summary.md" slinky-action sh -lc \
+            'INPUT_PATH=. INPUT_PATTERNS="test files/**" INPUT_CONCURRENCY=8 INPUT_TIMEOUT=5 INPUT_JSON_OUT=results.json INPUT_MD_OUT=results.md INPUT_FAIL_ON_FAILURES=true INPUT_COMMENT_PR=false INPUT_STEP_SUMMARY=true /entrypoint.sh'
+
+      - name: Upload results.json
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results
+          path: results.json
+      - name: Upload results.md
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-md
+          path: results.md
+
+

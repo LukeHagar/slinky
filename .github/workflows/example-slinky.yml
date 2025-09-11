@@ -1,0 +1,40 @@
+name: Slinky Example
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  slinky:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Slinky link checker
+        uses: ./\.github/actions/slinky
+        with:
+          path: .
+          patterns: "**/*"
+          concurrency: "16"
+          timeout: "10"
+          json-out: results.json
+          md-out: results.md
+          fail-on-failures: "true"
+          comment-pr: "true"
+          step-summary: "true"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: slinky-results
+          path: |
+            results.json
+            results.md
+
+

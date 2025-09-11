@@ -1,0 +1,11 @@
+2025-09-10 10:00:00 INFO Fetching https://example.com
+2025-09-10 10:00:01 INFO Fetching https://github.com/example/repo
+2025-09-10 10:00:02 WARN Retrying htp://bad-protocol.com
+2025-09-10 10:00:03 ERROR Failed to fetch http:///example.com
+2025-09-10 10:00:04 ERROR DNS error for https://this-domain-does-not-exist-123456789.com
+2025-09-10 10:00:05 INFO Fetching http://example.com:8080/api/status
+2025-09-10 10:00:06 ERROR Invalid host http://example..com
+2025-09-10 10:00:07 ERROR Missing domain https://
+2025-09-10 10:00:08 INFO Fetching https://en.wikipedia.org/wiki/Main_Page
+
+

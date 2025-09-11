@@ -1,0 +1,287 @@
+package fsurls
+
+import (
+	"bufio"
+	"io"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+
+	"github.com/bmatcuk/doublestar/v4"
+	ignore "github.com/sabhiram/go-gitignore"
+)
+
+// URL patterns from various contexts
+var bareURLRegex = regexp.MustCompile(`(?i)\bhttps?://[^\s<>()\[\]{}"']+`)
+var mdLinkRegex = regexp.MustCompile(`(?is)!?\[[^\]]*\]\((.*?)\)`) // captures (url)
+var angleURLRegex = regexp.MustCompile(`(?i)<(https?://[^>\s]+)>`)
+var quotedURLRegex = regexp.MustCompile(`(?i)"(https?://[^"\s]+)"|'(https?://[^'\s]+)'`)
+var htmlHrefRegex = regexp.MustCompile(`(?i)href\s*=\s*"([^"]+)"|href\s*=\s*'([^']+)'`)
+var htmlSrcRegex = regexp.MustCompile(`(?i)src\s*=\s*"([^"]+)"|src\s*=\s*'([^']+)'`)
+
+// Strict hostname validation: labels 1-63 chars, alnum & hyphen, not start/end hyphen, at least one dot, simple TLD
+var hostnameRegex = regexp.MustCompile(`^(?i)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
+
+// CollectURLs walks the directory tree rooted at rootPath and collects URLs found in
+// text-based files matching any of the provided glob patterns (doublestar ** supported).
+// If globs is empty, all files are considered. Respects .gitignore if present.
+// Returns a map from URL -> sorted unique list of file paths that contained it.
+func CollectURLs(rootPath string, globs []string) (map[string][]string, error) {
+	if strings.TrimSpace(rootPath) == "" {
+		rootPath = "."
+	}
+	cleanRoot := filepath.Clean(rootPath)
+
+	st, _ := os.Stat(cleanRoot)
+	isFileRoot := st != nil && !st.IsDir()
+	var ign *ignore.GitIgnore
+	if !isFileRoot {
+		ign = loadGitIgnore(cleanRoot)
+	}
+
+	var patterns []string
+	for _, g := range globs {
+		g = strings.TrimSpace(g)
+		if g == "" {
+			continue
+		}
+		patterns = append(patterns, g)
+	}
+
+	shouldInclude := func(rel string) bool {
+		if len(patterns) == 0 {
+			return true
+		}
+		for _, p := range patterns {
+			ok, _ := doublestar.PathMatch(p, rel)
+			if ok {
+				return true
+			}
+		}
+		return false
+	}
+
+	urlToFiles := make(map[string]map[string]struct{})
+
+	// 2 MiB max file size to avoid huge/binary files
+	const maxSize = 2 * 1024 * 1024
+
+	// Walk the filesystem
+	walkFn := func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, rerr := filepath.Rel(cleanRoot, path)
+		if rerr != nil {
+			rel = path
+		}
+		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			base := filepath.Base(path)
+			if base == ".git" {
+				return filepath.SkipDir
+			}
+			if ign != nil && ign.MatchesPath(rel) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if ign != nil && ign.MatchesPath(rel) {
+			return nil
+		}
+		info, ierr := d.Info()
+		if ierr != nil {
+			return nil
+		}
+		if info.Size() > maxSize {
+			return nil
+		}
+		if isFileRoot && rel == "." {
+			rel = filepath.ToSlash(filepath.Base(path))
+		}
+		if !shouldInclude(rel) {
+			return nil
+		}
+
+		f, ferr := os.Open(path)
+		if ferr != nil {
+			return nil
+		}
+		defer f.Close()
+		br := bufio.NewReader(f)
+		// Read up to maxSize bytes
+		var b strings.Builder
+		read := int64(0)
+		for {
+			chunk, cerr := br.ReadString('\n')
+			b.WriteString(chunk)
+			read += int64(len(chunk))
+			if cerr == io.EOF || read > maxSize {
+				break
+			}
+			if cerr != nil {
+				break
+			}
+		}
+		content := b.String()
+		// Skip if likely binary (NUL present)
+		if strings.IndexByte(content, '\x00') >= 0 {
+			return nil
+		}
+
+		candidates := extractCandidates(content)
+		if len(candidates) == 0 {
+			return nil
+		}
+		for _, raw := range candidates {
+			u := sanitizeURLToken(raw)
+			if u == "" {
+				continue
+			}
+			fileSet, ok := urlToFiles[u]
+			if !ok {
+				fileSet = make(map[string]struct{})
+				urlToFiles[u] = fileSet
+			}
+			fileSet[rel] = struct{}{}
+		}
+		return nil
+	}
+
+	_ = filepath.WalkDir(cleanRoot, walkFn)
+
+	// Convert to sorted slices
+	result := make(map[string][]string, len(urlToFiles))
+	for u, files := range urlToFiles {
+		var list []string
+		for fp := range files {
+			list = append(list, fp)
+		}
+		sort.Strings(list)
+		result[u] = list
+	}
+	return result, nil
+}
+
+func sanitizeURLToken(s string) string {
+	s = strings.TrimSpace(s)
+	// Strip surrounding angle brackets or quotes
+	if strings.HasPrefix(s, "<") && strings.HasSuffix(s, ">") {
+		s = strings.TrimSuffix(strings.TrimPrefix(s, "<"), ">")
+	}
+	if (strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"")) || (strings.HasPrefix(s, "'") && strings.HasSuffix(s, "'")) {
+		s = strings.TrimSuffix(strings.TrimPrefix(s, string(s[0])), string(s[0]))
+	}
+	// Trim trailing punctuation and balance parentheses
+	s = trimTrailingDelimiters(s)
+	low := strings.ToLower(s)
+	if !(strings.HasPrefix(low, "http://") || strings.HasPrefix(low, "https://")) {
+		return ""
+	}
+	// Parse and validate hostname strictly
+	u, err := url.Parse(s)
+	if err != nil || u == nil {
+		return ""
+	}
+	host := u.Hostname()
+	if host == "" {
+		return ""
+	}
+	// Reject placeholders like [tenant] or {tenant}
+	if strings.ContainsAny(host, "[]{}") {
+		return ""
+	}
+	// Must match strict hostname rules
+	if !hostnameRegex.MatchString(host) {
+		return ""
+	}
+	return s
+}
+
+func trimTrailingDelimiters(s string) string {
+	for {
+		if s == "" {
+			return s
+		}
+		last := s[len(s)-1]
+		if strings.ContainsRune(").,;:!?]'\"}", rune(last)) {
+			s = s[:len(s)-1]
+			continue
+		}
+		if last == ')' {
+			open := strings.Count(s, "(")
+			close := strings.Count(s, ")")
+			if close > open {
+				s = s[:len(s)-1]
+				continue
+			}
+		}
+		return s
+	}
+}
+
+func extractCandidates(content string) []string {
+	var out []string
+	for _, m := range mdLinkRegex.FindAllStringSubmatch(content, -1) {
+		if len(m) > 1 {
+			out = append(out, m[1])
+		}
+	}
+	for _, m := range htmlHrefRegex.FindAllStringSubmatch(content, -1) {
+		if len(m) > 2 {
+			if m[1] != "" {
+				out = append(out, m[1])
+			} else if m[2] != "" {
+				out = append(out, m[2])
+			}
+		}
+	}
+	for _, m := range htmlSrcRegex.FindAllStringSubmatch(content, -1) {
+		if len(m) > 2 {
+			if m[1] != "" {
+				out = append(out, m[1])
+			} else if m[2] != "" {
+				out = append(out, m[2])
+			}
+		}
+	}
+	for _, m := range angleURLRegex.FindAllStringSubmatch(content, -1) {
+		if len(m) > 1 {
+			out = append(out, m[1])
+		}
+	}
+	for _, m := range quotedURLRegex.FindAllStringSubmatch(content, -1) {
+		if len(m) > 2 {
+			if m[1] != "" {
+				out = append(out, m[1])
+			} else if m[2] != "" {
+				out = append(out, m[2])
+			}
+		}
+	}
+	out = append(out, bareURLRegex.FindAllString(content, -1)...)
+	return out
+}
+
+func loadGitIgnore(root string) *ignore.GitIgnore {
+	var lines []string
+	gi := filepath.Join(root, ".gitignore")
+	if b, err := os.ReadFile(gi); err == nil {
+		for _, ln := range strings.Split(string(b), "\n") {
+			lines = append(lines, ln)
+		}
+	}
+	ge := filepath.Join(root, ".git", "info", "exclude")
+	if b, err := os.ReadFile(ge); err == nil {
+		for _, ln := range strings.Split(string(b), "\n") {
+			lines = append(lines, ln)
+		}
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	return ignore.CompileIgnoreLines(lines...)
+}

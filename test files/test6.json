@@ -1,0 +1,21 @@
+{
+  "valid": [
+    "https://example.com",
+    "https://github.com",
+    "http://example.com:8080/path",
+    "https://en.wikipedia.org/wiki/Main_Page"
+  ],
+  "invalid": [
+    "htp://invalid-url.com",
+    "http:///example.com",
+    "http://example..com",
+    "https://"
+  ],
+  "nonexistent": [
+    "https://this-domain-does-not-exist-123456789.com",
+    "https://notarealwebsite.com/image.png",
+    "https://example.madeuptld"
+  ]
+}
+
+
