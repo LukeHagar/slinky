@@ -22,6 +22,10 @@ inputs:
     description: "HTTP timeout seconds"
     required: false
     default: "10"
+  respect_gitignore:
+    description: "Respect .gitignore while scanning"
+    required: false
+    default: "true"
   json_out:
     description: "Optional path to write JSON results"
     required: false
@@ -56,6 +60,7 @@ runs:
     INPUT_PATTERNS: ${{ inputs.patterns }}
     INPUT_CONCURRENCY: ${{ inputs.concurrency }}
     INPUT_TIMEOUT: ${{ inputs.timeout }}
+    INPUT_RESPECT_GITIGNORE: ${{ inputs.respect_gitignore }}
     INPUT_JSON_OUT: ${{ inputs.json_out }}
     INPUT_MD_OUT: ${{ inputs.md_out }}
     INPUT_REPO_BLOB_BASE: ${{ inputs.repo_blob_base }}

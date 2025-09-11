@@ -51,7 +51,7 @@ func init() {
 			cfg := web.Config{MaxConcurrency: maxConcurrency, RequestTimeout: timeout}
 
 			// Collect URLs
-			urlToFiles, err := fsurls.CollectURLs(path, gl)
+			urlToFiles, err := fsurls.CollectURLs(path, gl, respectGitignore)
 			if err != nil {
 				return err
 			}
@@ -157,13 +157,15 @@ func init() {
 	checkCmd.Flags().StringVar(&repoBlobBase, "repo-blob-base", "", "override GitHub blob base URL (e.g. https://github.com/owner/repo/blob/<sha>)")
 	checkCmd.Flags().IntVar(&timeoutSeconds, "timeout", 10, "HTTP request timeout in seconds")
 	checkCmd.Flags().BoolVar(&failOnFailures, "fail-on-failures", true, "exit non-zero if any links fail")
+	checkCmd.Flags().BoolVar(&respectGitignore, "respect-gitignore", true, "respect .gitignore while scanning (default true)")
 
 	rootCmd.AddCommand(checkCmd)
 }
 
 var (
-	timeoutSeconds int
-	failOnFailures bool
-	patterns       []string
-	repoBlobBase   string
+	timeoutSeconds   int
+	failOnFailures   bool
+	patterns         []string
+	repoBlobBase     string
+	respectGitignore bool
 )

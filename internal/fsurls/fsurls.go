@@ -28,9 +28,9 @@ var hostnameRegex = regexp.MustCompile(`^(?i)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9]
 
 // CollectURLs walks the directory tree rooted at rootPath and collects URLs found in
 // text-based files matching any of the provided glob patterns (doublestar ** supported).
-// If globs is empty, all files are considered. Respects .gitignore if present.
+// If globs is empty, all files are considered. Respects .gitignore if present and respectGitignore=true.
 // Returns a map from URL -> sorted unique list of file paths that contained it.
-func CollectURLs(rootPath string, globs []string) (map[string][]string, error) {
+func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[string][]string, error) {
 	if strings.TrimSpace(rootPath) == "" {
 		rootPath = "."
 	}
@@ -39,7 +39,7 @@ func CollectURLs(rootPath string, globs []string) (map[string][]string, error) {
 	st, _ := os.Stat(cleanRoot)
 	isFileRoot := st != nil && !st.IsDir()
 	var ign *ignore.GitIgnore
-	if !isFileRoot {
+	if !isFileRoot && respectGitignore {
 		ign = loadGitIgnore(cleanRoot)
 	}
 

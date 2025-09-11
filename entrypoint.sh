@@ -5,6 +5,7 @@ PATH_ARG="${INPUT_PATH:-.}"
 PATTERNS_ARG="${INPUT_PATTERNS:-**/*}"
 CONCURRENCY_ARG="${INPUT_CONCURRENCY:-16}"
 TIMEOUT_ARG="${INPUT_TIMEOUT:-10}"
+RESPECT_GITIGNORE_ARG="${INPUT_RESPECT_GITIGNORE:-true}"
 JSON_OUT_ARG="${INPUT_JSON_OUT:-results.json}"
 MD_OUT_ARG="${INPUT_MD_OUT:-results.md}"
 REPO_BLOB_BASE_ARG="${INPUT_REPO_BLOB_BASE:-}"
@@ -34,6 +35,11 @@ if [ -n "${JSON_OUT_ARG}" ]; then
 fi
 if [ -n "${MD_OUT_ARG}" ]; then
   set -- "$@" --md-out "$MD_OUT_ARG"
+fi
+if [ "${RESPECT_GITIGNORE_ARG}" = "true" ]; then
+  set -- "$@" --respect-gitignore=true
+else
+  set -- "$@" --respect-gitignore=false
 fi
 
 # Compute GitHub blob base URL for file links used in the Markdown report
