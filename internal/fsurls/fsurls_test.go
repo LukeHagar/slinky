@@ -9,7 +9,7 @@ import (
 func TestCollectURLs_FromTestFiles(t *testing.T) {
 	root := filepath.Join("..", "..", "testdata")
 
-	urls, err := CollectURLs(root, []string{"**/*"})
+	urls, err := CollectURLs(root, []string{"**/*"}, true)
 	if err != nil {
 		t.Fatalf("CollectURLs error: %v", err)
 	}
