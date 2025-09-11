@@ -56,13 +56,12 @@ func WriteMarkdown(path string, results []web.Result, s Summary) (string, error)
 		buf.WriteString(fmt.Sprintf("- **Root**: %s\n", escapeMD(s.RootPath)))
 	}
 
-	// Last run and duration
-	buf.WriteString(fmt.Sprintf("- **Last Run**: %s\n", s.StartedAt.Format("2006-01-02 15:04:05 MST")))
+	// Last run with duration
 	dur := s.FinishedAt.Sub(s.StartedAt)
 	if dur < 0 {
 		dur = 0
 	}
-	buf.WriteString(fmt.Sprintf("- **Duration**: %s\n", dur.Truncate(time.Millisecond)))
+	buf.WriteString(fmt.Sprintf("- **Last Run**: %s (Duration: %s)\n", s.StartedAt.Format("2006-01-02 15:04:05 MST"), dur.Truncate(time.Millisecond)))
 
 	// Totals
 	buf.WriteString(fmt.Sprintf("- **Total**: %d\n", s.Processed))
