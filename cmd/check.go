@@ -85,6 +85,10 @@ func init() {
 				} else {
 					failCount++
 				}
+				// Emit GitHub Actions debug log for each URL.
+				// These lines appear only when step debug logging is enabled via the
+				// repository/organization secret ACTIONS_STEP_DEBUG=true.
+				fmt.Printf("::debug::URL %s status=%d ok=%v err=%s sources=%d\n", r.URL, r.Status, r.OK, r.ErrMsg, len(r.Sources))
 				if jsonOut != "" && !r.OK {
 					failures = append(failures, SerializableResult{
 						URL:         r.URL,
