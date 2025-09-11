@@ -45,7 +45,7 @@ jobs:
 
       - name: Build action image
         run: |
-          docker build -t slinky-action -f .github/actions/slinky/Dockerfile .
+          docker build -t slinky-action -f Dockerfile .
 
       - name: Run action container (expect nonzero if failures)
         id: run_action

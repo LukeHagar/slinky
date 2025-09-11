@@ -1,0 +1,74 @@
+name: Publish Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next v1 tag
+        id: compute
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const tags = await github.paginate(github.rest.repos.listTags, { owner, repo, per_page: 100 });
+            const v1tags = tags
+              .map(t => t.name)
+              .filter(name => /^v1\.\d+\.\d+$/.test(name));
+            let nextPatch = 0;
+            let minor = 0;
+            if (v1tags.length > 0) {
+              let maxPatch = 0;
+              for (const name of v1tags) {
+                const [, mi, pa] = name.match(/^v1\.(\d+)\.(\d+)$/);
+                const m = parseInt(mi, 10);
+                const p = parseInt(pa, 10);
+                if (m > minor) { minor = m; maxPatch = p; }
+                else if (m === minor && p > maxPatch) { maxPatch = p; }
+              }
+              nextPatch = maxPatch + 1;
+            }
+            const newTag = `v1.${minor}.${nextPatch}`;
+            core.setOutput('tag', newTag);
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.compute.outputs.tag }}
+          release_name: ${{ steps.compute.outputs.tag }}
+          draft: false
+          prerelease: false
+
+      - name: Update floating v1 tag to latest
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const sha = context.sha;
+            const ref = 'tags/v1';
+            try {
+              await github.rest.git.getRef({ owner, repo, ref });
+              await github.rest.git.updateRef({ owner, repo, ref, sha, force: true });
+            } catch (e) {
+              await github.rest.git.createRef({ owner, repo, ref: `refs/${ref}`, sha });
+            }
+
+

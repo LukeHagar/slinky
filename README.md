@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run Slinky
-        uses: ./.github/actions/slinky
+        uses: owner/repo@v1
         with:
           path: .
           patterns: "**/*"

@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Slinky link checker
-        uses: ./\.github/actions/slinky
+        uses: ./
         with:
           path: .
           patterns: "**/*"

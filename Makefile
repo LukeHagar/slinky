@@ -21,7 +21,7 @@ check: build
 
 # Build the Docker-based GitHub Action locally
 action-image:
-	docker build -t slinky-action -f .github/actions/slinky/Dockerfile .
+	docker build -t slinky-action -f Dockerfile .
 
 # Run the Action container against the current repo
 action-run: action-image
