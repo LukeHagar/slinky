@@ -15,9 +15,9 @@ STEP_SUMMARY_ARG="${INPUT_STEP_SUMMARY:-true}"
 # Build argv safely
 set -- check "$PATH_ARG" --concurrency "$CONCURRENCY_ARG" --timeout "$TIMEOUT_ARG"
 if [ "${FAIL_ON_FAILURES_ARG}" = "true" ]; then
-  set -- "$@" --fail-on-failures true
+  set -- "$@" --fail-on-failures=true
 else
-  set -- "$@" --fail-on-failures false
+  set -- "$@" --fail-on-failures=false
 fi
 
 if [ -n "${PATTERNS_ARG}" ]; then
