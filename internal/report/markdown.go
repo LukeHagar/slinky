@@ -76,6 +76,20 @@ func WriteMarkdown(path string, results []web.Result, s Summary) (string, error)
 
 	buf.WriteString("\n")
 
+	// If no failures, show message and finish
+	if len(results) == 0 {
+		buf.WriteString("No issues found. ✅\n")
+		f, err := os.Create(path)
+		if err != nil {
+			return "", err
+		}
+		defer f.Close()
+		if _, err := f.Write(buf.Bytes()); err != nil {
+			return "", err
+		}
+		return path, nil
+	}
+
 	// Failures by URL
 	buf.WriteString("### Failures by URL\n\n")
 
