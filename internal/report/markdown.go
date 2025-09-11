@@ -53,7 +53,9 @@ func WriteMarkdown(path string, results []web.Result, s Summary) (string, error)
 
 	// Last run (not in the bullet list)
 	dur := s.FinishedAt.Sub(s.StartedAt)
-	if dur < 0 { dur = 0 }
+	if dur < 0 {
+		dur = 0
+	}
 	buf.WriteString(fmt.Sprintf("Last Run: %s (Duration: %s)\n\n", s.StartedAt.Format("2006-01-02 15:04:05 MST"), dur.Truncate(time.Millisecond)))
 
 	// Summary list: Pass, Fail, Total
@@ -77,9 +79,13 @@ func WriteMarkdown(path string, results []web.Result, s Summary) (string, error)
 	if len(results) == 0 {
 		buf.WriteString("No issues found. ✅\n")
 		f, err := os.Create(path)
-		if err != nil { return "", err }
+		if err != nil {
+			return "", err
+		}
 		defer f.Close()
-		if _, err := f.Write(buf.Bytes()); err != nil { return "", err }
+		if _, err := f.Write(buf.Bytes()); err != nil {
+			return "", err
+		}
 		return path, nil
 	}
 
@@ -87,50 +93,84 @@ func WriteMarkdown(path string, results []web.Result, s Summary) (string, error)
 	buf.WriteString("### Failures by URL\n\n")
 
 	// Gather issues per URL with list of files
-	type fileRef struct { Path string }
-	type urlIssue struct { Status int; Method string; ErrMsg string; Files []fileRef }
+	type fileRef struct{ Path string }
+	type urlIssue struct {
+		Status int
+		Method string
+		ErrMsg string
+		Files  []fileRef
+	}
 	byURL := make(map[string]*urlIssue)
 	for _, r := range results {
 		ui, ok := byURL[r.URL]
-		if !ok { ui = &urlIssue{Status: r.Status, Method: r.Method, ErrMsg: r.ErrMsg}; byURL[r.URL] = ui }
-		for _, src := range r.Sources { ui.Files = append(ui.Files, fileRef{Path: src}) }
+		if !ok {
+			ui = &urlIssue{Status: r.Status, Method: r.Method, ErrMsg: r.ErrMsg}
+			byURL[r.URL] = ui
+		}
+		for _, src := range r.Sources {
+			ui.Files = append(ui.Files, fileRef{Path: src})
+		}
 	}
 
 	// Sort URLs
 	var urls []string
-	for u := range byURL { urls = append(urls, u) }
+	for u := range byURL {
+		urls = append(urls, u)
+	}
 	sort.Strings(urls)
 
 	for _, u := range urls {
 		ui := byURL[u]
-		if ui.Status > 0 { buf.WriteString(fmt.Sprintf("- %d %s `%s` — %s\n", ui.Status, escapeMD(ui.Method), escapeMD(u), escapeMD(ui.ErrMsg))) }
-		else { buf.WriteString(fmt.Sprintf("- %s `%s` — %s\n", escapeMD(ui.Method), escapeMD(u), escapeMD(ui.ErrMsg))) }
+		if ui.Status > 0 {
+			buf.WriteString(fmt.Sprintf("- %d %s `%s` — %s\n", ui.Status, escapeMD(ui.Method), escapeMD(u), escapeMD(ui.ErrMsg)))
+		} else {
+			buf.WriteString(fmt.Sprintf("- %s `%s` — %s\n", escapeMD(ui.Method), escapeMD(u), escapeMD(ui.ErrMsg)))
+		}
 		buf.WriteString("  <details><summary>files</summary>\n\n")
 		seen := make(map[string]struct{})
 		var files []string
-		for _, fr := range ui.Files { if _, ok := seen[fr.Path]; ok { continue }; seen[fr.Path] = struct{}{}; files = append(files, fr.Path) }
+		for _, fr := range ui.Files {
+			if _, ok := seen[fr.Path]; ok {
+				continue
+			}
+			seen[fr.Path] = struct{}{}
+			files = append(files, fr.Path)
+		}
 		sort.Strings(files)
 		for _, fn := range files {
-			if strings.TrimSpace(s.RepoBlobBaseURL) != "" { buf.WriteString(fmt.Sprintf("  - [%s](%s/%s)\n", escapeMD(fn), strings.TrimRight(s.RepoBlobBaseURL, "/"), escapeLinkPath(fn))) }
-			else { buf.WriteString(fmt.Sprintf("  - [%s](./%s)\n", escapeMD(fn), escapeLinkPath(fn))) }
+			if strings.TrimSpace(s.RepoBlobBaseURL) != "" {
+				buf.WriteString(fmt.Sprintf("  - [%s](%s/%s)\n", escapeMD(fn), strings.TrimRight(s.RepoBlobBaseURL, "/"), escapeLinkPath(fn)))
+			} else {
+				buf.WriteString(fmt.Sprintf("  - [%s](./%s)\n", escapeMD(fn), escapeLinkPath(fn)))
+			}
 		}
 		buf.WriteString("\n  </details>\n\n")
 	}
 
 	f, err := os.Create(path)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	defer f.Close()
-	if _, err := f.Write(buf.Bytes()); err != nil { return "", err }
+	if _, err := f.Write(buf.Bytes()); err != nil {
+		return "", err
+	}
 	return path, nil
 }
 
 func escapeMD(s string) string { return html.EscapeString(s) }
 
 func formatSourcesList(srcs []string) string {
-	if len(srcs) == 0 { return "" }
+	if len(srcs) == 0 {
+		return ""
+	}
 	var b strings.Builder
 	b.WriteString("<ul>\n")
-	for _, s := range srcs { b.WriteString("  <li><code>"); b.WriteString(escapeMD(s)); b.WriteString("</code></li>\n") }
+	for _, s := range srcs {
+		b.WriteString("  <li><code>")
+		b.WriteString(escapeMD(s))
+		b.WriteString("</code></li>\n")
+	}
 	b.WriteString("</ul>")
 	return b.String()
 }
