@@ -2,6 +2,7 @@ package fsurls
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -106,6 +107,9 @@ func CollectURLs(rootPath string, globs []string) (map[string][]string, error) {
 			return nil
 		}
 
+		// Debug: announce file being parsed; GitHub shows ::debug only in debug runs
+		fmt.Printf("::debug:: Scanned File: %s\n", rel)
+
 		f, ferr := os.Open(path)
 		if ferr != nil {
 			return nil
@@ -207,7 +211,7 @@ func trimTrailingDelimiters(s string) string {
 			return s
 		}
 		last := s[len(s)-1]
-		if strings.ContainsRune(").,;:!?]'\"}", rune(last)) {
+		if strings.ContainsRune(").,;:!?]'"}", rune(last)) {
 			s = s[:len(s)-1]
 			continue
 		}
