@@ -51,8 +51,20 @@ jobs:
         id: run_action
         run: |
           set -e
-          docker run --rm -v "$PWD:/repo" -w /repo -e GITHUB_STEP_SUMMARY="/tmp/summary.md" slinky-action sh -lc \
-            'INPUT_PATH=. INPUT_PATTERNS="**/*" INPUT_CONCURRENCY=8 INPUT_TIMEOUT=5 INPUT_JSON_OUT=results.json INPUT_MD_OUT=results.md INPUT_FAIL_ON_FAILURES=true INPUT_COMMENT_PR=false INPUT_STEP_SUMMARY=true /entrypoint.sh'
+          docker run --rm \
+            -v "$PWD:/repo" \
+            -w /repo \
+            -e GITHUB_STEP_SUMMARY="/tmp/summary.md" \
+            -e INPUT_PATH=. \
+            -e INPUT_PATTERNS="**/*" \
+            -e INPUT_CONCURRENCY=8 \
+            -e INPUT_TIMEOUT=5 \
+            -e INPUT_JSON_OUT=results.json \
+            -e INPUT_MD_OUT=results.md \
+            -e INPUT_FAIL_ON_FAILURES=true \
+            -e INPUT_COMMENT_PR=false \
+            -e INPUT_STEP_SUMMARY=true \
+            slinky-action
 
       - name: Upload results.json
         if: always()
