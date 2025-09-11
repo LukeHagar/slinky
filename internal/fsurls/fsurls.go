@@ -211,7 +211,7 @@ func trimTrailingDelimiters(s string) string {
 			return s
 		}
 		last := s[len(s)-1]
-		if strings.ContainsRune(").,;:!?]'"}", rune(last)) {
+		if strings.ContainsRune(").,;:!?]'\"}", rune(last)) {
 			s = s[:len(s)-1]
 			continue
 		}
