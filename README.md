@@ -21,12 +21,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run Slinky
         uses: LukeHagar/slinky@v1
-        with:
-          path: .
-          patterns: "**/*"
-          md-out: results.md
-          json-out: results.json
-          comment-pr: "true"
 ```
 
 ### Inputs
