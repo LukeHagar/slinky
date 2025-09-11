@@ -17,16 +17,6 @@ jobs:
 
       - name: Run Slinky link checker
         uses: ./
-        with:
-          path: .
-          patterns: "**/*"
-          concurrency: "16"
-          timeout: "10"
-          json-out: results.json
-          md-out: results.md
-          fail-on-failures: "true"
-          comment-pr: "true"
-          step-summary: "true"
 
       - name: Upload results
         if: always()
