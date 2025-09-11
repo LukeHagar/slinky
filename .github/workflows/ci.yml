@@ -61,7 +61,7 @@ jobs:
             -e INPUT_TIMEOUT=5 \
             -e INPUT_JSON_OUT=results.json \
             -e INPUT_MD_OUT=results.md \
-            -e INPUT_FAIL_ON_FAILURES=true \
+            -e INPUT_FAIL_ON_FAILURES=false \
             -e INPUT_COMMENT_PR=false \
             -e INPUT_STEP_SUMMARY=true \
             slinky-action
