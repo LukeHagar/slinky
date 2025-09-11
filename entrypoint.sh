@@ -71,21 +71,32 @@ if [ "${STEP_SUMMARY_ARG}" = "true" ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ 
 fi
 
 # Post PR comment if this is a PR and requested
-if [ "${COMMENT_PR_ARG}" = "true" ] && [ -n "${MD_OUT_ARG}" ] && [ -f "${MD_OUT_ARG}" ]; then
-  PR_NUMBER=""
-  if [ -n "${GITHUB_EVENT_PATH:-}" ] && command -v jq >/dev/null 2>&1; then
-    PR_NUMBER="$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH" || true)"
-  fi
-  if [ -n "${PR_NUMBER}" ] && [ -n "${GITHUB_REPOSITORY:-}" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
-    BODY_CONTENT="$(cat "${MD_OUT_ARG}")"
-    curl -sS -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-         -H "Accept: application/vnd.github+json" \
-         -H "X-GitHub-Api-Version: 2022-11-28" \
-         -X POST "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-         -d "$(printf '{"body": %s}' "$(jq -Rs . <<EOF
+if [ "${COMMENT_PR_ARG}" = "true" ]; then
+  if [ -z "${MD_OUT_ARG}" ] || [ ! -f "${MD_OUT_ARG}" ]; then
+    echo "[slinky] No markdown report found at '${MD_OUT_ARG}', skipping PR comment."
+  else
+    PR_NUMBER=""
+    if [ -n "${GITHUB_EVENT_PATH:-}" ] && command -v jq >/dev/null 2>&1; then
+      PR_NUMBER="$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH" || true)"
+    fi
+    if [ -z "${PR_NUMBER}" ]; then
+      echo "[slinky] Not a pull_request event or PR number not found; skipping PR comment."
+    elif [ -z "${GITHUB_TOKEN:-}" ]; then
+      echo "[slinky] GITHUB_TOKEN not available; ensure the workflow grants permissions and passes the token as env. Skipping PR comment."
+    elif [ -z "${GITHUB_REPOSITORY:-}" ]; then
+      echo "[slinky] GITHUB_REPOSITORY not set; skipping PR comment."
+    else
+      BODY_CONTENT="$(cat "${MD_OUT_ARG}")"
+      curl -sS -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+           -H "Accept: application/vnd.github+json" \
+           -H "X-GitHub-Api-Version: 2022-11-28" \
+           -X POST "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+           -d "$(printf '{"body": %s}' "$(jq -Rs . <<EOF
 ${BODY_CONTENT}
 EOF
 )" )" >/dev/null || true
+      echo "[slinky] Posted PR comment to #${PR_NUMBER}."
+    fi
   fi
 fi
 

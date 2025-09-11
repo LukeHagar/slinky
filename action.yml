@@ -62,7 +62,6 @@ runs:
     INPUT_FAIL_ON_FAILURES: ${{ inputs.fail_on_failures }}
     INPUT_COMMENT_PR: ${{ inputs.comment_pr }}
     INPUT_STEP_SUMMARY: ${{ inputs.step_summary }}
-    GITHUB_TOKEN: ${{ github.token }}
 
 outputs:
   json_path:
