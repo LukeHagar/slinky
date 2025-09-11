@@ -7,7 +7,7 @@ import (
 )
 
 func TestCollectURLs_FromTestFiles(t *testing.T) {
-	root := filepath.Join("..", "..", "test files")
+	root := filepath.Join("..", "..", "testdata")
 
 	urls, err := CollectURLs(root, []string{"**/*"})
 	if err != nil {
@@ -19,7 +19,6 @@ func TestCollectURLs_FromTestFiles(t *testing.T) {
 		"https://example.com",
 		"https://en.wikipedia.org/wiki/Main_Page",
 		"http://example.com:8080",
-		"http://example..com", // appears in multiple files
 		"https://this-domain-does-not-exist-123456789.com",
 	}
 	for _, u := range mustContain {

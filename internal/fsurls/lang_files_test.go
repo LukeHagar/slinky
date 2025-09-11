@@ -6,7 +6,7 @@ import (
 )
 
 func TestCollectURLs_FromCodeFiles(t *testing.T) {
-	root := filepath.Join("..", "..", "test files")
+	root := filepath.Join("..", "..", "testdata")
 	urls, err := CollectURLs(root, []string{"**/*"})
 	if err != nil {
 		t.Fatalf("CollectURLs error: %v", err)
