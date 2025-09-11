@@ -93,7 +93,7 @@ if [ "${COMMENT_PR_ARG}" = "true" ]; then
       echo "[slinky] GITHUB_REPOSITORY not set; skipping PR comment."
     else
       BODY_CONTENT="$(cat "${MD_OUT_ARG}")"
-      COMMENT_BODY="<!-- slinky-report -->\n${BODY_CONTENT}"
+      COMMENT_BODY="$(printf '%s\n%s\n' '<!-- slinky-report -->' "${BODY_CONTENT}")"
 
       # Try to find an existing slinky comment to update
       COMMENTS_JSON=$(curl -sS -H "Authorization: Bearer ${GITHUB_TOKEN}" \
