@@ -12,26 +12,28 @@ FAIL_ON_FAILURES_ARG="${INPUT_FAIL_ON_FAILURES:-true}"
 COMMENT_PR_ARG="${INPUT_COMMENT_PR:-true}"
 STEP_SUMMARY_ARG="${INPUT_STEP_SUMMARY:-true}"
 
-ARGS="check \"${PATH_ARG}\" --concurrency ${CONCURRENCY_ARG} --timeout ${TIMEOUT_ARG}"
+# Build argv safely
+set -- check "$PATH_ARG" --concurrency "$CONCURRENCY_ARG" --timeout "$TIMEOUT_ARG"
 if [ "${FAIL_ON_FAILURES_ARG}" = "true" ]; then
-  ARGS="$ARGS --fail-on-failures true"
+  set -- "$@" --fail-on-failures true
 else
-  ARGS="$ARGS --fail-on-failures false"
+  set -- "$@" --fail-on-failures false
 fi
+
 if [ -n "${PATTERNS_ARG}" ]; then
-  NORM_PATTERNS=$(printf "%s" "${PATTERNS_ARG}" | sed 's/,\s*/,/g')
+  NORM_PATTERNS=$(printf "%s" "${PATTERNS_ARG}" | sed 's/,[[:space:]]*/,/g')
   IFS=','
-  set -- $NORM_PATTERNS
-  unset IFS
-  for pat in "$@"; do
-    ARGS="$ARGS --patterns \"$pat\""
+  for pat in $NORM_PATTERNS; do
+    set -- "$@" --patterns "$pat"
   done
+  unset IFS
 fi
+
 if [ -n "${JSON_OUT_ARG}" ]; then
-  ARGS="$ARGS --json-out \"${JSON_OUT_ARG}\""
+  set -- "$@" --json-out "$JSON_OUT_ARG"
 fi
 if [ -n "${MD_OUT_ARG}" ]; then
-  ARGS="$ARGS --md-out \"${MD_OUT_ARG}\""
+  set -- "$@" --md-out "$MD_OUT_ARG"
 fi
 
 # Compute GitHub blob base URL for file links used in the Markdown report
@@ -50,15 +52,16 @@ elif [ -n "${GITHUB_REPOSITORY:-}" ]; then
   fi
 fi
 
-eval slinky ${ARGS}
+# Execute
+slinky "$@"
 
-# Expose outputs
+# Expose outputs (use underscore names)
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   if [ -n "${JSON_OUT_ARG}" ]; then
-    echo "json-path=${JSON_OUT_ARG}" >> "$GITHUB_OUTPUT"
+    echo "json_path=${JSON_OUT_ARG}" >> "$GITHUB_OUTPUT"
   fi
   if [ -n "${MD_OUT_ARG}" ]; then
-    echo "md-path=${MD_OUT_ARG}" >> "$GITHUB_OUTPUT"
+    echo "md_path=${MD_OUT_ARG}" >> "$GITHUB_OUTPUT"
   fi
 fi
 
