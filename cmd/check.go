@@ -257,6 +257,10 @@ func init() {
 				mdPath = p
 			}
 
+			if shouldDebug() {
+				fmt.Printf("::debug:: Running Environment: repo=%s pr=%d token=%s mdPath=%s\n", ghRepo, ghPR, ghToken, mdPath)
+			}
+
 			// If running on a PR, post or update the comment
 			if ghOK && strings.TrimSpace(mdPath) != "" {
 				b, rerr := os.ReadFile(mdPath)
@@ -323,6 +327,12 @@ func detectGitHubPR() (repo string, prNumber int, token string, ok bool) {
 	repo = os.Getenv("GITHUB_REPOSITORY")
 	token = os.Getenv("GITHUB_TOKEN")
 	eventPath := os.Getenv("GITHUB_EVENT_PATH")
+	ref := os.Getenv("GITHUB_REF")
+
+	if shouldDebug() {
+		fmt.Printf("::debug:: Detected Environment: repo=%s eventPath=%s ref=%s\n", repo, eventPath, ref)
+	}
+
 	if repo == "" || eventPath == "" || token == "" {
 		return "", 0, "", false
 	}
@@ -336,6 +346,11 @@ func detectGitHubPR() (repo string, prNumber int, token string, ok bool) {
 		} `json:"pull_request"`
 	}
 	_ = json.Unmarshal(data, &ev)
+
+	if shouldDebug() {
+		fmt.Printf("::debug:: Detected Pull Request: number=%d\n", ev.PullRequest.Number)
+	}
+
 	if ev.PullRequest.Number == 0 {
 		return "", 0, "", false
 	}
@@ -366,11 +381,20 @@ func upsertPRComment(repo string, prNumber int, token string, body string) error
 			break
 		}
 	}
+
 	payload, _ := json.Marshal(map[string]string{"body": body})
 	if existingID > 0 {
+		if shouldDebug() {
+			fmt.Printf("::debug:: Updating existing comment: %d\n", existingID)
+		}
+
 		u := fmt.Sprintf("%s/repos/%s/issues/comments/%d", apiBase, repo, existingID)
 		req, _ = http.NewRequest(http.MethodPatch, u, bytes.NewReader(payload))
 	} else {
+		if shouldDebug() {
+			fmt.Printf("::debug:: Creating new comment\n")
+		}
+
 		u := fmt.Sprintf("%s/repos/%s/issues/%d/comments", apiBase, repo, prNumber)
 		req, _ = http.NewRequest(http.MethodPost, u, bytes.NewReader(payload))
 	}
