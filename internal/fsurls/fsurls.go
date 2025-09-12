@@ -38,6 +38,7 @@ func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[st
 
 	st, _ := os.Stat(cleanRoot)
 	isFileRoot := st != nil && !st.IsDir()
+
 	var ign *ignore.GitIgnore
 	if !isFileRoot && respectGitignore {
 		ign = loadGitIgnore(cleanRoot)
@@ -72,6 +73,8 @@ func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[st
 
 	// Walk the filesystem
 	walkFn := func(path string, d os.DirEntry, err error) error {
+		fmt.Printf("::debug:: Walking path: %s\n", path)
+
 		if err != nil {
 			return nil
 		}
