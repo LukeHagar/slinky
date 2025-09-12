@@ -401,6 +401,22 @@ func upsertPRComment(repo string, prNumber int, token string, body string) error
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Content-Type", "application/json")
-	_, _ = http.DefaultClient.Do(req)
+	upsertResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer upsertResp.Body.Close()
+	upsertRespBody, _ := io.ReadAll(upsertResp.Body)
+	upsertRespUnmarshalErr := json.Unmarshal(upsertRespBody, &upsertResp)
+	if upsertRespUnmarshalErr != nil {
+		return fmt.Errorf("failed to unmarshal upsert response: %s", upsertRespUnmarshalErr)
+	}
+	if shouldDebug() {
+		fmt.Printf("::debug:: Comment upserted Response: %s\n%s", upsertResp.Status, string(upsertRespBody))
+		fmt.Printf("::debug:: Comment upserted: %+v\n", upsertResp)
+	}
+	if upsertResp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to upsert comment: %s", upsertResp.Status)
+	}
 	return nil
 }
