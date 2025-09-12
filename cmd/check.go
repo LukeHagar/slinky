@@ -34,35 +34,127 @@ func init() {
 		Short: "Scan for URLs and validate them (headless)",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path := "."
-
-			var gl []string
-			if len(args) > 0 {
-				for _, a := range args {
-					for _, part := range strings.Split(a, ",") {
-						p := strings.TrimSpace(part)
-						if p != "" {
-							gl = append(gl, toSlash(p))
-						}
+			// Parse targets: allow comma-separated chunks
+			var raw []string
+			for _, a := range args {
+				for _, part := range strings.Split(a, ",") {
+					p := strings.TrimSpace(part)
+					if p != "" {
+						raw = append(raw, toSlash(p))
 					}
 				}
-			} else {
-				gl = []string{"**/*"}
+			}
+			if len(raw) == 0 {
+				raw = []string{"**/*"}
 			}
 
-			gl = expandDirectories(path, gl)
+			// Separate into globs (relative to ".") and concrete paths (dirs/files)
+			var globPatterns []string
+			type pathRoot struct {
+				path  string
+				isDir bool
+			}
+			var roots []pathRoot
+			for _, t := range raw {
+				if hasGlobMeta(t) {
+					globPatterns = append(globPatterns, t)
+					continue
+				}
+				if fi, err := os.Stat(t); err == nil {
+					roots = append(roots, pathRoot{path: t, isDir: fi.IsDir()})
+				} else {
+					// If stat fails, treat as glob pattern under "."
+					globPatterns = append(globPatterns, t)
+				}
+			}
 
-			// Emit normalized patterns for debugging
-			fmt.Printf("::debug:: Effective patterns: %s\n", strings.Join(gl, ","))
+			// Debug: show effective targets
+			if shouldDebug() {
+				fmt.Printf("::debug:: Roots: %s\n", strings.Join(func() []string {
+					var out []string
+					for _, r := range roots {
+						out = append(out, r.path)
+					}
+					return out
+				}(), ","))
+				fmt.Printf("::debug:: Glob patterns: %s\n", strings.Join(globPatterns, ","))
+			}
 
+			// Aggregate URL->files across all targets
+			agg := make(map[string]map[string]struct{})
+			merge := func(res map[string][]string, prefix string, isDir bool) {
+				for u, files := range res {
+					set, ok := agg[u]
+					if !ok {
+						set = make(map[string]struct{})
+						agg[u] = set
+					}
+					for _, fp := range files {
+						var merged string
+						if prefix == "" {
+							merged = fp
+						} else if isDir {
+							merged = toSlash(filepath.Join(prefix, fp))
+						} else {
+							// File root: keep the concrete file path
+							merged = toSlash(prefix)
+						}
+						set[merged] = struct{}{}
+					}
+				}
+			}
+
+			// 1) Collect for globs under current dir
+			if len(globPatterns) > 0 {
+				res, err := fsurls.CollectURLs(".", globPatterns, respectGitignore)
+				if err != nil {
+					return err
+				}
+				merge(res, "", true)
+			}
+			// 2) Collect for each concrete root
+			for _, r := range roots {
+				clean := toSlash(filepath.Clean(r.path))
+				if r.isDir {
+					res, err := fsurls.CollectURLs(r.path, []string{"**/*"}, respectGitignore)
+					if err != nil {
+						return err
+					}
+					merge(res, clean, true)
+				} else {
+					res, err := fsurls.CollectURLs(r.path, nil, respectGitignore)
+					if err != nil {
+						return err
+					}
+					merge(res, clean, false)
+				}
+			}
+
+			// Convert aggregator to final map with sorted file lists
+			urlToFiles := make(map[string][]string, len(agg))
+			for u, set := range agg {
+				var files []string
+				for f := range set {
+					files = append(files, f)
+				}
+				sort.Strings(files)
+				urlToFiles[u] = files
+			}
+
+			// Derive display root; we use "." when multiple roots to avoid confusion
+			displayRoot := "."
+			if len(roots) == 1 && len(globPatterns) == 0 {
+				displayRoot = roots[0].path
+			}
+			if shouldDebug() {
+				fmt.Printf("::debug:: Root: %s\n", displayRoot)
+			}
+
+			// Build config
 			timeout := time.Duration(timeoutSeconds) * time.Second
 			cfg := web.Config{MaxConcurrency: maxConcurrency, RequestTimeout: timeout}
 
-			// Collect URLs
-			urlToFiles, err := fsurls.CollectURLs(path, gl, respectGitignore)
-			if err != nil {
-				return err
-			}
+			// Prepare URL list
 			var urls []string
 			for u := range urlToFiles {
 				urls = append(urls, u)
@@ -96,7 +188,9 @@ func init() {
 				// Emit GitHub Actions debug log for each URL.
 				// These lines appear only when step debug logging is enabled via the
 				// repository/organization secret ACTIONS_STEP_DEBUG=true.
-				fmt.Printf("::debug:: Scanned URL: %s status=%d ok=%v err=%s sources=%d\n", r.URL, r.Status, r.OK, r.ErrMsg, len(r.Sources))
+				if shouldDebug() {
+					fmt.Printf("::debug:: Scanned URL: %s status=%d ok=%v err=%s sources=%d\n", r.URL, r.Status, r.OK, r.ErrMsg, len(r.Sources))
+				}
 				if jsonOut != "" && !r.OK {
 					failures = append(failures, SerializableResult{
 						URL:         r.URL,
@@ -135,7 +229,7 @@ func init() {
 					base = os.Getenv("SLINKY_REPO_BLOB_BASE_URL")
 				}
 				summary := report.Summary{
-					RootPath:        path,
+					RootPath:        displayRoot,
 					StartedAt:       startedAt,
 					FinishedAt:      time.Now(),
 					Processed:       total,
@@ -189,25 +283,4 @@ func toSlash(p string) string {
 
 func hasGlobMeta(s string) bool {
 	return strings.ContainsAny(s, "*?[")
-}
-
-func expandDirectories(root string, pats []string) []string {
-	var out []string
-	for _, p := range pats {
-		pp := strings.TrimSpace(p)
-		if pp == "" {
-			continue
-		}
-		if hasGlobMeta(pp) {
-			out = append(out, pp)
-			continue
-		}
-		abs := filepath.Join(root, filepath.FromSlash(pp))
-		if fi, err := os.Stat(abs); err == nil && fi.IsDir() {
-			out = append(out, strings.TrimSuffix(pp, "/")+"/**/*")
-		} else {
-			out = append(out, pp)
-		}
-	}
-	return out
 }

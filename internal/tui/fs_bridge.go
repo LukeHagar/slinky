@@ -8,3 +8,7 @@ import (
 func fsCollect(root string, globs []string) (map[string][]string, error) {
 	return fsurls.CollectURLs(root, globs, true)
 }
+
+func fsCollectProgress(root string, globs []string, onFile func(string)) (map[string][]string, error) {
+	return fsurls.CollectURLsProgress(root, globs, true, onFile)
+}

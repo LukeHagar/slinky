@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -29,7 +30,22 @@ func init() {
 			} else {
 				gl = []string{"**/*"}
 			}
-			return tui.Run(".", gl, cfg, jsonOut, mdOut)
+
+			root := "."
+			if len(gl) == 1 && !hasGlobMeta(gl[0]) {
+				candidate := gl[0]
+				if fi, err := os.Stat(candidate); err == nil {
+					if fi.IsDir() {
+						root = candidate
+						gl = []string{"**/*"}
+					} else {
+						root = candidate
+						gl = nil
+					}
+				}
+			}
+
+			return tui.Run(root, gl, cfg, jsonOut, mdOut)
 		},
 	}
 

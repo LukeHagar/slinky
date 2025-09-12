@@ -25,6 +25,8 @@ type crawlDoneMsg struct{}
 type statsMsg struct{ s web.Stats }
 type tickMsg struct{ t time.Time }
 
+type fileScannedMsg struct{ rel string }
+
 type model struct {
 	rootPath string
 	cfg      web.Config
@@ -48,13 +50,14 @@ type model struct {
 	ok    int
 	fail  int
 
-	pending   int
-	processed int
-
+	pending       int
+	processed     int
 	lastProcessed int
 	rps           float64
 	peakRPS       float64
 	lowRPS        float64
+
+	filesScanned int
 
 	allResults []web.Result
 	jsonPath   string
@@ -83,7 +86,12 @@ func (m *model) Init() tea.Cmd {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		defer cancel()
-		urlsMap, _ := fsCollect(m.rootPath, m.globs)
+		urlsMap, _ := fsCollectProgress(m.rootPath, m.globs, func(rel string) {
+			m.filesScanned++
+			// Emit a short event line per file to show activity
+			m.lines = append(m.lines, fmt.Sprintf("📄 %s", rel))
+			m.refreshViewport()
+		})
 		var urls []string
 		for u := range urlsMap {
 			urls = append(urls, u)
@@ -280,6 +288,7 @@ func (m *model) View() string {
 			fmt.Sprintf("Duration: %s", dur.Truncate(time.Millisecond)),
 			fmt.Sprintf("Processed: %d  OK:%d  Fail:%d", m.processed, m.ok, m.fail),
 			fmt.Sprintf("Rates: avg %.1f/s  peak %.1f/s  low %.1f/s", avg, m.peakRPS, m.lowRPS),
+			fmt.Sprintf("Files scanned: %d", m.filesScanned),
 		}
 		if m.jsonPath != "" {
 			summary = append(summary, fmt.Sprintf("JSON: %s", m.jsonPath))
@@ -297,7 +306,7 @@ func (m *model) View() string {
 		percent = float64(m.processed) / float64(totalWork)
 	}
 	progressLine := m.prog.ViewAs(percent)
-	stats := fmt.Sprintf("%s  total:%d  ok:%d  fail:%d  pending:%d processed:%d  rps:%.1f/s", m.spin.View(), m.total, m.ok, m.fail, m.pending, m.processed, m.rps)
+	stats := fmt.Sprintf("%s  total:%d  ok:%d  fail:%d  pending:%d processed:%d  rps:%.1f/s  files:%d", m.spin.View(), m.total, m.ok, m.fail, m.pending, m.processed, m.rps, m.filesScanned)
 	body := m.vp.View()
 	footer := lipgloss.NewStyle().Faint(true).Render("Controls: [q] quit  [f] toggle fails")
 	container := lipgloss.NewStyle().Padding(1)

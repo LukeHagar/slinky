@@ -26,6 +26,19 @@ var htmlSrcRegex = regexp.MustCompile(`(?i)src\s*=\s*"([^"]+)"|src\s*=\s*'([^']+
 // Strict hostname validation: labels 1-63 chars, alnum & hyphen, not start/end hyphen, at least one dot, simple TLD
 var hostnameRegex = regexp.MustCompile(`^(?i)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
 
+func isDebugEnv() bool {
+	if os.Getenv("SLINKY_DEBUG") == "1" {
+		return true
+	}
+	if strings.EqualFold(os.Getenv("ACTIONS_STEP_DEBUG"), "true") {
+		return true
+	}
+	if os.Getenv("RUNNER_DEBUG") == "1" {
+		return true
+	}
+	return false
+}
+
 // CollectURLs walks the directory tree rooted at rootPath and collects URLs found in
 // text-based files matching any of the provided glob patterns (doublestar ** supported).
 // If globs is empty, all files are considered. Respects .gitignore if present and respectGitignore=true.
@@ -73,7 +86,9 @@ func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[st
 
 	// Walk the filesystem
 	walkFn := func(path string, d os.DirEntry, err error) error {
-		fmt.Printf("::debug:: Walking path: %s\n", path)
+		if isDebugEnv() {
+			fmt.Printf("::debug:: Walking path: %s\n", path)
+		}
 
 		if err != nil {
 			return nil
@@ -108,7 +123,9 @@ func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[st
 		}
 
 		// Debug: announce file being parsed; GitHub shows ::debug only in debug runs
-		fmt.Printf("::debug:: Scanned File: %s\n", rel)
+		if isDebugEnv() {
+			fmt.Printf("::debug:: Scanned File: %s\n", rel)
+		}
 
 		f, ferr := os.Open(path)
 		if ferr != nil {
@@ -158,6 +175,142 @@ func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[st
 	_ = filepath.WalkDir(cleanRoot, walkFn)
 
 	// Convert to sorted slices
+	result := make(map[string][]string, len(urlToFiles))
+	for u, files := range urlToFiles {
+		var list []string
+		for fp := range files {
+			list = append(list, fp)
+		}
+		sort.Strings(list)
+		result[u] = list
+	}
+	return result, nil
+}
+
+// CollectURLsProgress is like CollectURLs but invokes onFile(relPath) for each included file.
+func CollectURLsProgress(rootPath string, globs []string, respectGitignore bool, onFile func(string)) (map[string][]string, error) {
+	if strings.TrimSpace(rootPath) == "" {
+		rootPath = "."
+	}
+	cleanRoot := filepath.Clean(rootPath)
+
+	st, _ := os.Stat(cleanRoot)
+	isFileRoot := st != nil && !st.IsDir()
+
+	var ign *ignore.GitIgnore
+	if !isFileRoot && respectGitignore {
+		ign = loadGitIgnore(cleanRoot)
+	}
+
+	var patterns []string
+	for _, g := range globs {
+		g = strings.TrimSpace(g)
+		if g == "" {
+			continue
+		}
+		patterns = append(patterns, g)
+	}
+
+	shouldInclude := func(rel string) bool {
+		if len(patterns) == 0 {
+			return true
+		}
+		for _, p := range patterns {
+			ok, _ := doublestar.PathMatch(p, rel)
+			if ok {
+				return true
+			}
+		}
+		return false
+	}
+
+	urlToFiles := make(map[string]map[string]struct{})
+
+	// 2 MiB max file size to avoid huge/binary files
+	const maxSize = 2 * 1024 * 1024
+
+	walkFn := func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, rerr := filepath.Rel(cleanRoot, path)
+		if rerr != nil {
+			rel = path
+		}
+		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			base := filepath.Base(path)
+			if base == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if ign != nil && ign.MatchesPath(rel) {
+			return nil
+		}
+		info, ierr := d.Info()
+		if ierr != nil {
+			return nil
+		}
+		if info.Size() > maxSize {
+			return nil
+		}
+		if isFileRoot && rel == "." {
+			rel = filepath.ToSlash(filepath.Base(path))
+		}
+		if !shouldInclude(rel) {
+			return nil
+		}
+
+		if onFile != nil {
+			onFile(rel)
+		}
+
+		f, ferr := os.Open(path)
+		if ferr != nil {
+			return nil
+		}
+		defer f.Close()
+		br := bufio.NewReader(f)
+		var b strings.Builder
+		read := int64(0)
+		for {
+			chunk, cerr := br.ReadString('\n')
+			b.WriteString(chunk)
+			read += int64(len(chunk))
+			if cerr == io.EOF || read > maxSize {
+				break
+			}
+			if cerr != nil {
+				break
+			}
+		}
+		content := b.String()
+		if strings.IndexByte(content, '\x00') >= 0 {
+			return nil
+		}
+
+		candidates := extractCandidates(content)
+		if len(candidates) == 0 {
+			return nil
+		}
+		for _, raw := range candidates {
+			u := sanitizeURLToken(raw)
+			if u == "" {
+				continue
+			}
+			fileSet, ok := urlToFiles[u]
+			if !ok {
+				fileSet = make(map[string]struct{})
+				urlToFiles[u] = fileSet
+			}
+			fileSet[rel] = struct{}{}
+		}
+		return nil
+	}
+
+	_ = filepath.WalkDir(cleanRoot, walkFn)
+
 	result := make(map[string][]string, len(urlToFiles))
 	for u, files := range urlToFiles {
 		var list []string
