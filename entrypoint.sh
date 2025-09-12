@@ -84,59 +84,7 @@ if [ "${STEP_SUMMARY_ARG}" = "true" ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ 
   cat "${MD_OUT_ARG}" >> "$GITHUB_STEP_SUMMARY"
 fi
 
-# Post PR comment if this is a PR and requested (even if the run failed)
-if [ "${COMMENT_PR_ARG}" = "true" ]; then
-  if [ -z "${MD_OUT_ARG}" ] || [ ! -f "${MD_OUT_ARG}" ]; then
-    echo "[slinky] No markdown report found at '${MD_OUT_ARG}', skipping PR comment."
-  else
-    PR_NUMBER=""
-    if [ -n "${GITHUB_EVENT_PATH:-}" ] && command -v jq >/dev/null 2>&1; then
-      PR_NUMBER="$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH" || true)"
-    fi
-    if [ -z "${PR_NUMBER}" ]; then
-      echo "[slinky] Not a pull_request event or PR number not found; skipping PR comment."
-    elif [ -z "${GITHUB_TOKEN:-}" ]; then
-      echo "[slinky] GITHUB_TOKEN not available; ensure the workflow grants permissions and passes the token as env. Skipping PR comment."
-    elif [ -z "${GITHUB_REPOSITORY:-}" ]; then
-      echo "[slinky] GITHUB_REPOSITORY not set; skipping PR comment."
-    else
-      BODY_CONTENT="$(cat "${MD_OUT_ARG}")"
-      COMMENT_BODY="$(printf '%s\n%s\n' '<!-- slinky-report -->' "${BODY_CONTENT}")"
-
-      # Try to find an existing slinky comment to update
-      COMMENTS_JSON=$(curl -sS -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-           -H "Accept: application/vnd.github+json" \
-           -H "X-GitHub-Api-Version: 2022-11-28" \
-           "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100") || COMMENTS_JSON="[]"
-
-      EXISTING_ID=$(printf '%s' "${COMMENTS_JSON}" | jq -r '[.[] | select((.body // "") | contains("<!-- slinky-report -->"))][0].id // empty')
-
-      if [ -n "${EXISTING_ID}" ]; then
-        # Update existing comment
-        curl -sS -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-             -H "Accept: application/vnd.github+json" \
-             -H "X-GitHub-Api-Version: 2022-11-28" \
-             -X PATCH "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING_ID}" \
-             -d "$(printf '{"body": %s}' "$(jq -Rs . <<EOF
-${COMMENT_BODY}
-EOF
-)" )" >/dev/null || true
-        echo "[slinky] Updated existing PR comment #${EXISTING_ID}."
-      else
-        # Create new comment
-        curl -sS -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-             -H "Accept: application/vnd.github+json" \
-             -H "X-GitHub-Api-Version: 2022-11-28" \
-             -X POST "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-             -d "$(printf '{"body": %s}' "$(jq -Rs . <<EOF
-${COMMENT_BODY}
-EOF
-)" )" >/dev/null || true
-        echo "[slinky] Posted PR comment to #${PR_NUMBER}."
-      fi
-    fi
-  fi
-fi
+# PR comment handling is now done in the CLI itself when running on a PR
 
 exit ${SLINKY_EXIT_CODE:-0}
 

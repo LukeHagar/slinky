@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -222,24 +225,45 @@ func init() {
 				_ = f.Close()
 			}
 
-			// Optionally write Markdown report for PR comment consumption
-			if mdOut != "" {
-				base := repoBlobBase
-				if strings.TrimSpace(base) == "" {
-					base = os.Getenv("SLINKY_REPO_BLOB_BASE_URL")
-				}
-				summary := report.Summary{
-					RootPath:        displayRoot,
-					StartedAt:       startedAt,
-					FinishedAt:      time.Now(),
-					Processed:       total,
-					OK:              okCount,
-					Fail:            failCount,
-					JSONPath:        jsonOut,
-					RepoBlobBaseURL: base,
-				}
-				if _, err := report.WriteMarkdown(mdOut, failedResults, summary); err != nil {
+			// Build report summary
+			base := repoBlobBase
+			if strings.TrimSpace(base) == "" {
+				base = os.Getenv("SLINKY_REPO_BLOB_BASE_URL")
+			}
+			summary := report.Summary{
+				RootPath:        displayRoot,
+				StartedAt:       startedAt,
+				FinishedAt:      time.Now(),
+				Processed:       total,
+				OK:              okCount,
+				Fail:            failCount,
+				FilesScanned:    countFiles(urlToFiles),
+				JSONPath:        jsonOut,
+				RepoBlobBaseURL: base,
+			}
+
+			// Ensure we have a markdown file if needed for PR comment
+			mdPath := mdOut
+			ghRepo, ghPR, ghToken, ghOK := detectGitHubPR()
+			if strings.TrimSpace(mdPath) != "" {
+				if _, err := report.WriteMarkdown(mdPath, failedResults, summary); err != nil {
 					return err
+				}
+			} else if ghOK {
+				p, err := report.WriteMarkdown("", failedResults, summary)
+				if err != nil {
+					return err
+				}
+				mdPath = p
+			}
+
+			// If running on a PR, post or update the comment
+			if ghOK && strings.TrimSpace(mdPath) != "" {
+				b, rerr := os.ReadFile(mdPath)
+				if rerr == nil {
+					body := string(b)
+					body = fmt.Sprintf("%s\n%s", "<!-- slinky-report -->", body)
+					_ = upsertPRComment(ghRepo, ghPR, ghToken, body)
 				}
 			}
 
@@ -283,4 +307,76 @@ func toSlash(p string) string {
 
 func hasGlobMeta(s string) bool {
 	return strings.ContainsAny(s, "*?[")
+}
+
+func countFiles(urlToFiles map[string][]string) int {
+	seen := make(map[string]struct{})
+	for _, files := range urlToFiles {
+		for _, f := range files {
+			seen[f] = struct{}{}
+		}
+	}
+	return len(seen)
+}
+
+func detectGitHubPR() (repo string, prNumber int, token string, ok bool) {
+	repo = os.Getenv("GITHUB_REPOSITORY")
+	token = os.Getenv("GITHUB_TOKEN")
+	eventPath := os.Getenv("GITHUB_EVENT_PATH")
+	if repo == "" || eventPath == "" || token == "" {
+		return "", 0, "", false
+	}
+	data, err := os.ReadFile(eventPath)
+	if err != nil {
+		return "", 0, "", false
+	}
+	var ev struct {
+		PullRequest struct {
+			Number int `json:"number"`
+		} `json:"pull_request"`
+	}
+	_ = json.Unmarshal(data, &ev)
+	if ev.PullRequest.Number == 0 {
+		return "", 0, "", false
+	}
+	return repo, ev.PullRequest.Number, token, true
+}
+
+func upsertPRComment(repo string, prNumber int, token string, body string) error {
+	apiBase := "https://api.github.com"
+	listURL := fmt.Sprintf("%s/repos/%s/issues/%d/comments?per_page=100", apiBase, repo, prNumber)
+	req, _ := http.NewRequest(http.MethodGet, listURL, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	var comments []struct {
+		ID   int    `json:"id"`
+		Body string `json:"body"`
+	}
+	b, _ := io.ReadAll(resp.Body)
+	_ = json.Unmarshal(b, &comments)
+	var existingID int
+	for _, c := range comments {
+		if strings.Contains(c.Body, "<!-- slinky-report -->") {
+			existingID = c.ID
+			break
+		}
+	}
+	payload, _ := json.Marshal(map[string]string{"body": body})
+	if existingID > 0 {
+		u := fmt.Sprintf("%s/repos/%s/issues/comments/%d", apiBase, repo, existingID)
+		req, _ = http.NewRequest(http.MethodPatch, u, bytes.NewReader(payload))
+	} else {
+		u := fmt.Sprintf("%s/repos/%s/issues/%d/comments", apiBase, repo, prNumber)
+		req, _ = http.NewRequest(http.MethodPost, u, bytes.NewReader(payload))
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+	_, _ = http.DefaultClient.Do(req)
+	return nil
 }

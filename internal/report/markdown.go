@@ -24,6 +24,7 @@ type Summary struct {
 	AvgRPS          float64
 	PeakRPS         float64
 	LowRPS          float64
+	FilesScanned    int
 	JSONPath        string
 	RepoBlobBaseURL string // e.g. https://github.com/owner/repo/blob/<sha>
 }
@@ -51,17 +52,21 @@ func WriteMarkdown(path string, results []web.Result, s Summary) (string, error)
 	// Title
 	buf.WriteString("## Slinky Test Report\n\n")
 
-	// Last run (not in the bullet list)
+	// Last run (not in the bullet list). Render in US Central Time.
 	dur := s.FinishedAt.Sub(s.StartedAt)
 	if dur < 0 {
 		dur = 0
 	}
-	buf.WriteString(fmt.Sprintf("Last Run: %s (Duration: %s)\n\n", s.StartedAt.Format("2006-01-02 15:04:05 MST"), dur.Truncate(time.Millisecond)))
+	loc, _ := time.LoadLocation("America/Chicago")
+	buf.WriteString(fmt.Sprintf("Last Run: %s (Duration: %s)\n\n", s.StartedAt.In(loc).Format("2006-01-02 15:04:05 MST"), dur.Truncate(time.Millisecond)))
 
 	// Summary list: Pass, Fail, Total
 	buf.WriteString(fmt.Sprintf("- **Pass**: %d\n", s.OK))
 	buf.WriteString(fmt.Sprintf("- **Fail**: %d\n", s.Fail))
 	buf.WriteString(fmt.Sprintf("- **Total**: %d\n", s.Processed))
+	if s.FilesScanned > 0 {
+		buf.WriteString(fmt.Sprintf("- **Files Scanned**: %d\n", s.FilesScanned))
+	}
 
 	// Optional root
 	if strings.TrimSpace(s.RootPath) != "." && strings.TrimSpace(s.RootPath) != "" && s.RootPath != string(filepath.Separator) {
