@@ -2,6 +2,7 @@ package fsurls
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
@@ -60,6 +61,8 @@ func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[st
 	if !isFileRoot && respectGitignore {
 		ign = loadGitIgnore(cleanRoot)
 	}
+	// Load optional .slinkignore config
+	slPathIgnore, slURLPatterns := loadSlinkyIgnore(cleanRoot)
 
 	var patterns []string
 	for _, g := range globs {
@@ -109,7 +112,7 @@ func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[st
 			}
 			return nil
 		}
-		if ign != nil && ign.MatchesPath(rel) {
+		if (ign != nil && ign.MatchesPath(rel)) || (slPathIgnore != nil && slPathIgnore.MatchesPath(rel)) {
 			return nil
 		}
 		info, ierr := d.Info()
@@ -166,6 +169,9 @@ func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[st
 			if u == "" {
 				continue
 			}
+			if isURLIgnored(u, slURLPatterns) {
+				continue
+			}
 			fileSet, ok := urlToFiles[u]
 			if !ok {
 				fileSet = make(map[string]struct{})
@@ -205,6 +211,7 @@ func CollectURLsProgress(rootPath string, globs []string, respectGitignore bool,
 	if !isFileRoot && respectGitignore {
 		ign = loadGitIgnore(cleanRoot)
 	}
+	slPathIgnore, slURLPatterns := loadSlinkyIgnore(cleanRoot)
 
 	var patterns []string
 	for _, g := range globs {
@@ -249,7 +256,7 @@ func CollectURLsProgress(rootPath string, globs []string, respectGitignore bool,
 			}
 			return nil
 		}
-		if ign != nil && ign.MatchesPath(rel) {
+		if (ign != nil && ign.MatchesPath(rel)) || (slPathIgnore != nil && slPathIgnore.MatchesPath(rel)) {
 			return nil
 		}
 		info, ierr := d.Info()
@@ -301,6 +308,9 @@ func CollectURLsProgress(rootPath string, globs []string, respectGitignore bool,
 		for _, raw := range candidates {
 			u := sanitizeURLToken(raw)
 			if u == "" {
+				continue
+			}
+			if isURLIgnored(u, slURLPatterns) {
 				continue
 			}
 			fileSet, ok := urlToFiles[u]
@@ -557,4 +567,54 @@ func loadGitIgnore(root string) *ignore.GitIgnore {
 		return nil
 	}
 	return ignore.CompileIgnoreLines(lines...)
+}
+
+// .slinkignore support
+type slinkyIgnore struct {
+	IgnorePaths []string `json:"ignorePaths"`
+	IgnoreURLs  []string `json:"ignoreURLs"`
+}
+
+func loadSlinkyIgnore(root string) (*ignore.GitIgnore, []string) {
+	cfgPath := filepath.Join(root, ".slinkignore")
+	b, err := os.ReadFile(cfgPath)
+	if err != nil || len(b) == 0 {
+		return nil, nil
+	}
+	var cfg slinkyIgnore
+	if jerr := json.Unmarshal(b, &cfg); jerr != nil {
+		return nil, nil
+	}
+	var ign *ignore.GitIgnore
+	if len(cfg.IgnorePaths) > 0 {
+		ign = ignore.CompileIgnoreLines(cfg.IgnorePaths...)
+	}
+	var urlPatterns []string
+	for _, p := range cfg.IgnoreURLs {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			urlPatterns = append(urlPatterns, p)
+		}
+	}
+	return ign, urlPatterns
+}
+
+func isURLIgnored(u string, patterns []string) bool {
+	if len(patterns) == 0 {
+		return false
+	}
+	for _, p := range patterns {
+		if p == "" {
+			continue
+		}
+		// simple contains or wildcard suffix/prefix match
+		if p == u || strings.Contains(u, p) {
+			return true
+		}
+		// doublestar path-like match for full URL string
+		if ok, _ := doublestar.PathMatch(p, u); ok {
+			return true
+		}
+	}
+	return false
 }

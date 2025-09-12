@@ -1,0 +1,10 @@
+{
+  "ignorePaths": [
+    "**/ignore-me/**",
+    "**/*.bak"
+  ],
+  "ignoreURLs": [
+    "https://example.com/this/path/does/not/exist",
+    "*notarealwebsite.com*"
+  ]
+}

@@ -70,3 +70,28 @@ Notes:
 - Skips likely binary files and files > 2 MiB.
 - Uses a browser-like User-Agent to reduce false negatives.
 
+### .slinkignore
+
+Place a `.slinkignore` file at the repository root to exclude paths and/or specific URLs from scanning and reporting. The format is JSON with two optional arrays:
+
+```json
+{
+  "ignorePaths": [
+    "**/vendor/**",
+    "**/*.bak"
+  ],
+  "ignoreURLs": [
+    "https://example.com/this/path/does/not/exist",
+    "*localhost:*",
+    "*internal.example.com*"
+  ]
+}
+```
+
+- ignorePaths: gitignore-style patterns evaluated against repository-relative paths (uses doublestar `**`).
+- ignoreURLs: patterns applied to the full URL string. Supports exact matches, substring contains, and doublestar-style wildcard matches.
+
+Examples:
+- Ignore generated folders: `"**/dist/**"`, backups: `"**/*.bak"`.
+- Ignore known example or placeholder links: `"*example.com*"`, `"https://example.com/foo"`.
+

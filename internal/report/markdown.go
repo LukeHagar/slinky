@@ -151,7 +151,6 @@ func WriteMarkdown(path string, results []web.Result, s Summary) (string, error)
 				buf.WriteString(fmt.Sprintf("  - [%s](./%s)\n", escapeMD(fn), escapeLinkPath(fn)))
 			}
 		}
-		buf.WriteString("\n")
 	}
 
 	f, err := os.Create(path)

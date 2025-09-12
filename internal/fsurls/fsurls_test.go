@@ -39,4 +39,18 @@ func TestCollectURLs_FromTestFiles(t *testing.T) {
 	if len(srcs) == 0 {
 		t.Fatalf("expected sources for https://example.com, got none")
 	}
+
+	// Verify .slinkignore URL ignores
+	if _, ok := urls["https://example.com/this/path/does/not/exist"]; ok {
+		t.Fatalf("expected URL ignored by .slinkignore to be absent")
+	}
+
+	// Verify .slinkignore path ignores: file under ignore-me should not contribute
+	for u, files := range urls {
+		for _, f := range files {
+			if strings.Contains(f, "ignore-me/") {
+				t.Fatalf("file %s should have been ignored via .slinkignore, but contributed to URL %s", f, u)
+			}
+		}
+	}
 }

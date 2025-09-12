@@ -178,6 +178,8 @@ func init() {
 			go web.CheckURLs(ctx, urls, urlToFiles, results, nil, cfg)
 
 			var total, okCount, failCount int
+			totalURLs := len(urls)
+			lastPctLogged := 0
 			var failures []SerializableResult
 			var failedResults []web.Result
 
@@ -187,6 +189,14 @@ func init() {
 					okCount++
 				} else {
 					failCount++
+				}
+				// Progress notices every 5%
+				if totalURLs > 0 {
+					pct := (total * 100) / totalURLs
+					for pct >= lastPctLogged+5 && lastPctLogged < 100 {
+						lastPctLogged += 5
+						fmt.Printf("::notice:: Checking progress: %d%% (%d/%d)\n", lastPctLogged, total, totalURLs)
+					}
 				}
 				// Emit GitHub Actions debug log for each URL.
 				// These lines appear only when step debug logging is enabled via the
