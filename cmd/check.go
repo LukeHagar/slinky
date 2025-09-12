@@ -172,7 +172,7 @@ func init() {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			results := make(chan web.Result, 256)
-			web.CheckURLs(ctx, urls, urlToFiles, results, nil, cfg)
+			go web.CheckURLs(ctx, urls, urlToFiles, results, nil, cfg)
 
 			var total, okCount, failCount int
 			var failures []SerializableResult
