@@ -11,29 +11,28 @@ import (
 
 func init() {
 	runCmd := &cobra.Command{
-		Use:   "run [path]",
+		Use:   "run [targets...]",
 		Short: "Scan a directory/repo for URLs in files and validate them (TUI)",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path := "."
-			if len(args) == 1 {
-				path = args[0]
-			}
 			cfg := web.Config{MaxConcurrency: maxConcurrency}
 			var gl []string
-			if len(patterns) > 0 {
-				gl = append(gl, patterns...)
-			} else if globPat != "" {
-				gl = strings.Split(globPat, ",")
+			if len(args) > 0 {
+				for _, a := range args {
+					for _, part := range strings.Split(a, ",") {
+						p := strings.TrimSpace(part)
+						if p != "" {
+							gl = append(gl, p)
+						}
+					}
+				}
 			} else {
 				gl = []string{"**/*"}
 			}
-			return tui.Run(path, gl, cfg, jsonOut, mdOut)
+			return tui.Run(".", gl, cfg, jsonOut, mdOut)
 		},
 	}
 
-	runCmd.Flags().StringVar(&globPat, "glob", "", "comma-separated glob patterns for files (doublestar); empty = all files")
-	runCmd.Flags().StringSliceVar(&patterns, "patterns", nil, "file match patterns (doublestar). Examples: docs/**/*.md,**/*.go; defaults to **/*")
 	runCmd.Flags().IntVar(&maxConcurrency, "concurrency", 16, "maximum concurrent requests")
 	runCmd.Flags().StringVar(&jsonOut, "json-out", "", "path to write full JSON results (array)")
 	runCmd.Flags().StringVar(&mdOut, "md-out", "", "path to write Markdown report for PR comment")
@@ -44,6 +43,5 @@ func init() {
 var (
 	maxConcurrency int
 	jsonOut        string
-	globPat        string
 	mdOut          string
 )

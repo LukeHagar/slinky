@@ -51,14 +51,18 @@ go build -o slinky ./
 Usage:
 
 ```bash
-slinky check . --patterns "docs/**/*.md" --patterns "**/*.go" --md-out results.md --json-out results.json
+# Headless: provide one or more targets (files, dirs, or globs)
+slinky check **/*
+slinky check ./docs/**/* ./markdown/**/*
+
+# TUI mode: same targets
+slinky run **/*
 ```
 
-TUI mode:
-
-```bash
-slinky run . --patterns "**/*"
-```
+Notes:
+- Targets can be files, directories, or doublestar globs. Multiple targets are allowed.
+- If no targets are provided, the default is `**/*` relative to the current working directory.
+- Legacy flags `--glob` and `--patterns` are still supported, but positional targets are preferred.
 
 ### Notes
 

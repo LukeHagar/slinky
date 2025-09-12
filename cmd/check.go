@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -29,23 +30,30 @@ type SerializableResult struct {
 
 func init() {
 	checkCmd := &cobra.Command{
-		Use:   "check [path]",
-		Short: "Scan a directory for URLs and validate them (headless)",
-		Args:  cobra.MaximumNArgs(1),
+		Use:   "check [targets...]",
+		Short: "Scan for URLs and validate them (headless)",
+		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := "."
-			if len(args) == 1 {
-				path = args[0]
-			}
 
 			var gl []string
-			if len(patterns) > 0 {
-				gl = append(gl, patterns...)
-			} else if globPat != "" {
-				gl = strings.Split(globPat, ",")
+			if len(args) > 0 {
+				for _, a := range args {
+					for _, part := range strings.Split(a, ",") {
+						p := strings.TrimSpace(part)
+						if p != "" {
+							gl = append(gl, toSlash(p))
+						}
+					}
+				}
 			} else {
 				gl = []string{"**/*"}
 			}
+
+			gl = expandDirectories(path, gl)
+
+			// Emit normalized patterns for debugging
+			fmt.Printf("::debug:: Effective patterns: %s\n", strings.Join(gl, ","))
 
 			timeout := time.Duration(timeoutSeconds) * time.Second
 			cfg := web.Config{MaxConcurrency: maxConcurrency, RequestTimeout: timeout}
@@ -149,8 +157,6 @@ func init() {
 		},
 	}
 
-	checkCmd.Flags().StringVar(&globPat, "glob", "", "comma-separated glob patterns for files (doublestar); empty = all files")
-	checkCmd.Flags().StringSliceVar(&patterns, "patterns", nil, "file match patterns (doublestar). Examples: docs/**/*.md,**/*.go; defaults to **/*")
 	checkCmd.Flags().IntVar(&maxConcurrency, "concurrency", 16, "maximum concurrent requests")
 	checkCmd.Flags().StringVar(&jsonOut, "json-out", "", "path to write full JSON results (array)")
 	checkCmd.Flags().StringVar(&mdOut, "md-out", "", "path to write Markdown report for PR comment")
@@ -165,7 +171,43 @@ func init() {
 var (
 	timeoutSeconds   int
 	failOnFailures   bool
-	patterns         []string
 	repoBlobBase     string
 	respectGitignore bool
 )
+
+func toSlash(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return p
+	}
+	p = filepath.ToSlash(p)
+	if after, ok := strings.CutPrefix(p, "./"); ok {
+		p = after
+	}
+	return p
+}
+
+func hasGlobMeta(s string) bool {
+	return strings.ContainsAny(s, "*?[")
+}
+
+func expandDirectories(root string, pats []string) []string {
+	var out []string
+	for _, p := range pats {
+		pp := strings.TrimSpace(p)
+		if pp == "" {
+			continue
+		}
+		if hasGlobMeta(pp) {
+			out = append(out, pp)
+			continue
+		}
+		abs := filepath.Join(root, filepath.FromSlash(pp))
+		if fi, err := os.Stat(abs); err == nil && fi.IsDir() {
+			out = append(out, strings.TrimSuffix(pp, "/")+"/**/*")
+		} else {
+			out = append(out, pp)
+		}
+	}
+	return out
+}

@@ -14,7 +14,7 @@ COMMENT_PR_ARG="${INPUT_COMMENT_PR:-true}"
 STEP_SUMMARY_ARG="${INPUT_STEP_SUMMARY:-true}"
 
 # Build argv safely
-set -- check "$PATH_ARG" --concurrency "$CONCURRENCY_ARG" --timeout "$TIMEOUT_ARG"
+set -- check --concurrency "$CONCURRENCY_ARG" --timeout "$TIMEOUT_ARG"
 if [ "${FAIL_ON_FAILURES_ARG}" = "true" ]; then
   set -- "$@" --fail-on-failures=true
 else
@@ -22,12 +22,9 @@ else
 fi
 
 if [ -n "${PATTERNS_ARG}" ]; then
-  NORM_PATTERNS=$(printf "%s" "${PATTERNS_ARG}" | sed 's/,[[:space:]]*/,/g')
-  IFS=','
-  for pat in $NORM_PATTERNS; do
-    set -- "$@" --patterns "$pat"
-  done
-  unset IFS
+  set -- "$@" "$PATTERNS_ARG"
+else
+  set -- "$@" "**/*"
 fi
 
 if [ -n "${JSON_OUT_ARG}" ]; then
@@ -60,8 +57,9 @@ fi
 
 # Emit consolidated config at start (visible with ACTIONS_STEP_DEBUG=true)
 EFFECTIVE_REPO_BLOB_BASE="${SLINKY_REPO_BLOB_BASE_URL:-$REPO_BLOB_BASE_ARG}"
-printf "::debug:: Config: path=%s patterns=%s concurrency=%s timeout=%s respect_gitignore=%s json_out=%s md_out=%s fail_on_failures=%s comment_pr=%s step_summary=%s repo_blob_base_url=%s\n" \
-  "$PATH_ARG" "$PATTERNS_ARG" "$CONCURRENCY_ARG" "$TIMEOUT_ARG" "$RESPECT_GITIGNORE_ARG" "$JSON_OUT_ARG" "$MD_OUT_ARG" \
+TARGETS_DEBUG="${PATTERNS_ARG:-**/*}"
+printf "::debug:: Config: targets=%s concurrency=%s timeout=%s respect_gitignore=%s json_out=%s md_out=%s fail_on_failures=%s comment_pr=%s step_summary=%s repo_blob_base_url=%s\n" \
+  "$TARGETS_DEBUG" "$CONCURRENCY_ARG" "$TIMEOUT_ARG" "$RESPECT_GITIGNORE_ARG" "$JSON_OUT_ARG" "$MD_OUT_ARG" \
   "$FAIL_ON_FAILURES_ARG" "$COMMENT_PR_ARG" "$STEP_SUMMARY_ARG" "$EFFECTIVE_REPO_BLOB_BASE"
 printf "::debug:: CLI Args: slinky %s\n" "$*"
 
