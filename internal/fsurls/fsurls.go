@@ -16,12 +16,16 @@ import (
 )
 
 // URL patterns from various contexts
-var bareURLRegex = regexp.MustCompile(`(?i)\bhttps?://[^\s<>()\[\]{}"']+`)
+var bareURLRegex = regexp.MustCompile(`(?i)\bhttps?://[^\s<>\[\]{}"']+`)
 var mdLinkRegex = regexp.MustCompile(`(?is)!?\[[^\]]*\]\((.*?)\)`) // captures (url)
 var angleURLRegex = regexp.MustCompile(`(?i)<(https?://[^>\s]+)>`)
 var quotedURLRegex = regexp.MustCompile(`(?i)"(https?://[^"\s]+)"|'(https?://[^'\s]+)'`)
 var htmlHrefRegex = regexp.MustCompile(`(?i)href\s*=\s*"([^"]+)"|href\s*=\s*'([^']+)'`)
 var htmlSrcRegex = regexp.MustCompile(`(?i)src\s*=\s*"([^"]+)"|src\s*=\s*'([^']+)'`)
+
+// Markdown code sections to ignore when extracting autolinks
+var mdFencedCodeRegex = regexp.MustCompile("(?s)```[\\s\\S]*?```")
+var mdInlineCodeRegex = regexp.MustCompile("`[^`]+`")
 
 // Strict hostname validation: labels 1-63 chars, alnum & hyphen, not start/end hyphen, at least one dot, simple TLD
 var hostnameRegex = regexp.MustCompile(`^(?i)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
@@ -153,7 +157,7 @@ func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[st
 			return nil
 		}
 
-		candidates := extractCandidates(content)
+		candidates := extractCandidates(rel, content)
 		if len(candidates) == 0 {
 			return nil
 		}
@@ -290,7 +294,7 @@ func CollectURLsProgress(rootPath string, globs []string, respectGitignore bool,
 			return nil
 		}
 
-		candidates := extractCandidates(content)
+		candidates := extractCandidates(rel, content)
 		if len(candidates) == 0 {
 			return nil
 		}
@@ -332,8 +336,8 @@ func sanitizeURLToken(s string) string {
 	if (strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"")) || (strings.HasPrefix(s, "'") && strings.HasSuffix(s, "'")) {
 		s = strings.TrimSuffix(strings.TrimPrefix(s, string(s[0])), string(s[0]))
 	}
-	// Trim trailing punctuation and balance parentheses
-	s = trimTrailingDelimiters(s)
+	// Trim obvious invalid chars at both ends and balance brackets/parentheses
+	s = trimDelimiters(s)
 	low := strings.ToLower(s)
 	if !(strings.HasPrefix(low, "http://") || strings.HasPrefix(low, "https://")) {
 		return ""
@@ -364,14 +368,39 @@ func trimTrailingDelimiters(s string) string {
 			return s
 		}
 		last := s[len(s)-1]
-		if strings.ContainsRune(").,;:!?]'\"}", rune(last)) {
-			s = s[:len(s)-1]
-			continue
-		}
-		if last == ')' {
+		// Preserve closing brackets/parens if balanced; only strip if unmatched
+		switch last {
+		case ')':
 			open := strings.Count(s, "(")
 			close := strings.Count(s, ")")
 			if close > open {
+				s = s[:len(s)-1]
+				continue
+			}
+		case ']':
+			open := strings.Count(s, "[")
+			close := strings.Count(s, "]")
+			if close > open {
+				s = s[:len(s)-1]
+				continue
+			}
+		case '}':
+			open := strings.Count(s, "{")
+			close := strings.Count(s, "}")
+			if close > open {
+				s = s[:len(s)-1]
+				continue
+			}
+		case '>':
+			open := strings.Count(s, "<")
+			close := strings.Count(s, ">")
+			if close > open {
+				s = s[:len(s)-1]
+				continue
+			}
+		default:
+			// Common trailing punctuation and markdown emphasis markers that are not part of URLs
+			if strings.ContainsRune(",.;:!?]'\"*_~`", rune(last)) {
 				s = s[:len(s)-1]
 				continue
 			}
@@ -380,46 +409,133 @@ func trimTrailingDelimiters(s string) string {
 	}
 }
 
-func extractCandidates(content string) []string {
+func trimLeadingDelimiters(s string) string {
+	for {
+		if s == "" {
+			return s
+		}
+		first := s[0]
+		// Strip common leading punctuation/formatting not valid at URL start
+		if strings.ContainsRune("'\"*_~`,;:!?)]}.", rune(first)) {
+			s = s[1:]
+			continue
+		}
+		// If starts with unmatched opening bracket, drop it
+		switch first {
+		case '(':
+			open := strings.Count(s, "(")
+			close := strings.Count(s, ")")
+			if open > close {
+				s = s[1:]
+				continue
+			}
+		case '[':
+			open := strings.Count(s, "[")
+			close := strings.Count(s, "]")
+			if open > close {
+				s = s[1:]
+				continue
+			}
+		case '{':
+			open := strings.Count(s, "{")
+			close := strings.Count(s, "}")
+			if open > close {
+				s = s[1:]
+				continue
+			}
+		case '<':
+			open := strings.Count(s, "<")
+			close := strings.Count(s, ">")
+			if open > close {
+				s = s[1:]
+				continue
+			}
+		}
+		return s
+	}
+}
+
+// trimDelimiters trims invalid leading/trailing delimiters until the string stabilizes.
+func trimDelimiters(s string) string {
+	prev := ""
+	for s != prev {
+		prev = s
+		s = trimLeadingDelimiters(s)
+		s = trimTrailingDelimiters(s)
+	}
+	return s
+}
+
+func extractCandidates(rel string, content string) []string {
 	var out []string
-	for _, m := range mdLinkRegex.FindAllStringSubmatch(content, -1) {
-		if len(m) > 1 {
-			out = append(out, m[1])
-		}
-	}
-	for _, m := range htmlHrefRegex.FindAllStringSubmatch(content, -1) {
-		if len(m) > 2 {
-			if m[1] != "" {
-				out = append(out, m[1])
-			} else if m[2] != "" {
-				out = append(out, m[2])
+
+	lowerRel := strings.ToLower(rel)
+	ext := strings.ToLower(filepath.Ext(lowerRel))
+
+	appendFromDual := func(matches [][]string) {
+		for _, m := range matches {
+			if len(m) > 2 {
+				if m[1] != "" {
+					out = append(out, m[1])
+				} else if m[2] != "" {
+					out = append(out, m[2])
+				}
 			}
 		}
 	}
-	for _, m := range htmlSrcRegex.FindAllStringSubmatch(content, -1) {
-		if len(m) > 2 {
-			if m[1] != "" {
+
+	isMarkdown := ext == ".md" || ext == ".markdown" || ext == ".mdx"
+	isHTML := ext == ".html" || ext == ".htm" || ext == ".xhtml"
+
+	switch {
+	case isMarkdown:
+		// Remove fenced and inline code before scanning for URLs
+		withoutFences := mdFencedCodeRegex.ReplaceAllString(content, "")
+		withoutInline := mdInlineCodeRegex.ReplaceAllString(withoutFences, "")
+
+		for _, m := range mdLinkRegex.FindAllStringSubmatch(withoutInline, -1) {
+			if len(m) > 1 {
 				out = append(out, m[1])
-			} else if m[2] != "" {
-				out = append(out, m[2])
 			}
 		}
-	}
-	for _, m := range angleURLRegex.FindAllStringSubmatch(content, -1) {
-		if len(m) > 1 {
-			out = append(out, m[1])
-		}
-	}
-	for _, m := range quotedURLRegex.FindAllStringSubmatch(content, -1) {
-		if len(m) > 2 {
-			if m[1] != "" {
+		for _, m := range angleURLRegex.FindAllStringSubmatch(withoutInline, -1) {
+			if len(m) > 1 {
 				out = append(out, m[1])
-			} else if m[2] != "" {
-				out = append(out, m[2])
 			}
 		}
+		for _, m := range quotedURLRegex.FindAllStringSubmatch(withoutInline, -1) {
+			if len(m) > 2 {
+				if m[1] != "" {
+					out = append(out, m[1])
+				} else if m[2] != "" {
+					out = append(out, m[2])
+				}
+			}
+		}
+		out = append(out, bareURLRegex.FindAllString(withoutInline, -1)...)
+
+	case isHTML:
+		appendFromDual(htmlHrefRegex.FindAllStringSubmatch(content, -1))
+		appendFromDual(htmlSrcRegex.FindAllStringSubmatch(content, -1))
+
+	default:
+		for _, m := range angleURLRegex.FindAllStringSubmatch(content, -1) {
+			if len(m) > 1 {
+				out = append(out, m[1])
+			}
+		}
+		for _, m := range quotedURLRegex.FindAllStringSubmatch(content, -1) {
+			if len(m) > 2 {
+				if m[1] != "" {
+					out = append(out, m[1])
+				} else if m[2] != "" {
+					out = append(out, m[2])
+				}
+			}
+		}
+		out = append(out, bareURLRegex.FindAllString(content, -1)...)
 	}
-	out = append(out, bareURLRegex.FindAllString(content, -1)...)
+
 	return out
 }
 

@@ -165,21 +165,8 @@ func WriteMarkdown(path string, results []web.Result, s Summary) (string, error)
 	return path, nil
 }
 
-func escapeMD(s string) string { return html.EscapeString(s) }
-
-func formatSourcesList(srcs []string) string {
-	if len(srcs) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("<ul>\n")
-	for _, s := range srcs {
-		b.WriteString("  <li><code>")
-		b.WriteString(escapeMD(s))
-		b.WriteString("</code></li>\n")
-	}
-	b.WriteString("</ul>")
-	return b.String()
+func escapeMD(s string) string {
+	return html.EscapeString(s)
 }
 
 func escapeLinkPath(p string) string {

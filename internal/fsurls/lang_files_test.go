@@ -27,6 +27,22 @@ func TestCollectURLs_FromCodeFiles(t *testing.T) {
 		}
 	}
 
+	// Ensure sanitizer trims emphasis and punctuation
+	if _, ok := urls["https://sailpoint.api.identitynow.com/v2024"]; !ok {
+		t.Fatalf("expected sanitized emphasized URL to be collected without trailing *")
+	}
+	if _, ok := urls["https://example.com/path"]; !ok {
+		t.Fatalf("expected URL with trailing ) to be trimmed")
+	}
+	if _, ok := urls["https://example.com/foo"]; !ok {
+		t.Fatalf("expected URL with trailing , to be trimmed")
+	}
+
+	// Balanced parens should be preserved
+	if _, ok := urls["https://example.com/q?(x)"]; !ok {
+		t.Fatalf("expected URL with balanced parentheses to be preserved")
+	}
+
 	// Placeholder patterns should be excluded by strict validation
 	placeholders := []string{
 		"https://[tenant].api.identitynow.com",
