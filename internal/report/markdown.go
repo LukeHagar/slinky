@@ -57,7 +57,10 @@ func WriteMarkdown(path string, results []web.Result, s Summary) (string, error)
 	if dur < 0 {
 		dur = 0
 	}
-	loc, _ := time.LoadLocation("America/Chicago")
+	loc, tzErr := time.LoadLocation("America/Chicago")
+	if tzErr != nil || loc == nil {
+		loc = time.FixedZone("CST", -6*60*60)
+	}
 	buf.WriteString(fmt.Sprintf("Last Run: %s (Duration: %s)\n\n", s.StartedAt.In(loc).Format("2006-01-02 15:04:05 MST"), dur.Truncate(time.Millisecond)))
 
 	// Summary list: Pass, Fail, Total
