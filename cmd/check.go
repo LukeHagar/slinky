@@ -195,7 +195,7 @@ func init() {
 					pct := (total * 100) / totalURLs
 					for pct >= lastPctLogged+5 && lastPctLogged < 100 {
 						lastPctLogged += 5
-						fmt.Printf("::notice:: Checking progress: %d%% (%d/%d)\n", lastPctLogged, total, totalURLs)
+						fmt.Printf("::progress:: %d%% (%d/%d)\n", lastPctLogged, total, totalURLs)
 					}
 				}
 				// Emit GitHub Actions debug log for each URL.
