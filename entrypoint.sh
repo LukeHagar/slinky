@@ -63,8 +63,11 @@ printf "::debug:: Config: targets=%s concurrency=%s timeout=%s respect_gitignore
   "$FAIL_ON_FAILURES_ARG" "$COMMENT_PR_ARG" "$STEP_SUMMARY_ARG" "$EFFECTIVE_REPO_BLOB_BASE"
 printf "::debug:: CLI Args: slinky %s\n" "$*"
 
-# Execute
+# Execute but always continue to allow summaries/comments even on failure
+set +e
 slinky "$@"
+SLINKY_EXIT_CODE=$?
+set -e
 
 # Expose outputs (use underscore names)
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
@@ -81,7 +84,7 @@ if [ "${STEP_SUMMARY_ARG}" = "true" ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ 
   cat "${MD_OUT_ARG}" >> "$GITHUB_STEP_SUMMARY"
 fi
 
-# Post PR comment if this is a PR and requested
+# Post PR comment if this is a PR and requested (even if the run failed)
 if [ "${COMMENT_PR_ARG}" = "true" ]; then
   if [ -z "${MD_OUT_ARG}" ] || [ ! -f "${MD_OUT_ARG}" ]; then
     echo "[slinky] No markdown report found at '${MD_OUT_ARG}', skipping PR comment."
@@ -135,4 +138,5 @@ EOF
   fi
 fi
 
+exit ${SLINKY_EXIT_CODE:-0}
 
