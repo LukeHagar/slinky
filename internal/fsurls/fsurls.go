@@ -85,9 +85,6 @@ func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[st
 			if base == ".git" {
 				return filepath.SkipDir
 			}
-			if ign != nil && ign.MatchesPath(rel) {
-				return filepath.SkipDir
-			}
 			return nil
 		}
 		if ign != nil && ign.MatchesPath(rel) {
