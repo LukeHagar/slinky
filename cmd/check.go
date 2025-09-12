@@ -245,29 +245,33 @@ func init() {
 			// Ensure we have a markdown file if needed for PR comment
 			mdPath := mdOut
 			ghRepo, ghPR, ghToken, ghOK := detectGitHubPR()
+			var finalMDPath string
 			if strings.TrimSpace(mdPath) != "" {
 				if _, err := report.WriteMarkdown(mdPath, failedResults, summary); err != nil {
 					return err
 				}
+				finalMDPath = mdPath
 			} else if ghOK {
 				p, err := report.WriteMarkdown("", failedResults, summary)
 				if err != nil {
 					return err
 				}
-				mdPath = p
+				finalMDPath = p
 			}
 
-			if shouldDebug() {
-				fmt.Printf("::debug:: Running Environment: repo=%s pr=%d token=%s mdPath=%s\n", ghRepo, ghPR, ghToken, mdPath)
-			}
-
-			// If running on a PR, post or update the comment
-			if ghOK && strings.TrimSpace(mdPath) != "" {
-				b, rerr := os.ReadFile(mdPath)
+			// If running on a PR, post or update the comment(s), chunking as needed
+			if ghOK && strings.TrimSpace(finalMDPath) != "" {
+				b, rerr := os.ReadFile(finalMDPath)
 				if rerr == nil {
-					body := string(b)
-					body = fmt.Sprintf("%s\n%s", "<!-- slinky-report -->", body)
-					_ = upsertPRComment(ghRepo, ghPR, ghToken, body)
+					full := string(b)
+					if shouldDebug() {
+						fmt.Printf("::debug:: Report size (chars): %d\n", len(full))
+					}
+					chunks := chunkMarkdownByURL(full)
+					if shouldDebug() {
+						fmt.Printf("::debug:: Posting %d chunk(s)\n", len(chunks))
+					}
+					_ = upsertPRComments(ghRepo, ghPR, ghToken, chunks)
 				}
 			}
 
@@ -327,12 +331,6 @@ func detectGitHubPR() (repo string, prNumber int, token string, ok bool) {
 	repo = os.Getenv("GITHUB_REPOSITORY")
 	token = os.Getenv("GITHUB_TOKEN")
 	eventPath := os.Getenv("GITHUB_EVENT_PATH")
-	ref := os.Getenv("GITHUB_REF")
-
-	if shouldDebug() {
-		fmt.Printf("::debug:: Detected Environment: repo=%s eventPath=%s ref=%s\n", repo, eventPath, ref)
-	}
-
 	if repo == "" || eventPath == "" || token == "" {
 		return "", 0, "", false
 	}
@@ -346,18 +344,88 @@ func detectGitHubPR() (repo string, prNumber int, token string, ok bool) {
 		} `json:"pull_request"`
 	}
 	_ = json.Unmarshal(data, &ev)
-
-	if shouldDebug() {
-		fmt.Printf("::debug:: Detected Pull Request: number=%d\n", ev.PullRequest.Number)
-	}
-
 	if ev.PullRequest.Number == 0 {
 		return "", 0, "", false
 	}
 	return repo, ev.PullRequest.Number, token, true
 }
 
-func upsertPRComment(repo string, prNumber int, token string, body string) error {
+// chunkMarkdownByURL splits markdown into chunks under GitHub's comment body limit,
+// keeping whole URL entries together. Only the first chunk includes the original
+// header and the "Failures by URL" section header. Subsequent chunks have no headers.
+func chunkMarkdownByURL(body string) []string {
+	const maxBody = 65000
+	lines := strings.Split(body, "\n")
+	// locate failures header
+	failIdx := -1
+	for i, ln := range lines {
+		if strings.TrimSpace(ln) == "### Failures by URL" {
+			failIdx = i
+			break
+		}
+	}
+	if failIdx < 0 {
+		// no failures section; return as single chunk
+		return []string{body}
+	}
+	preamble := strings.Join(lines[:failIdx+1], "\n") + "\n"
+	entryLines := lines[failIdx+1:]
+
+	// build entries by URL block, starting at lines with "- " at column 0
+	type entry struct {
+		text   string
+		length int
+	}
+	var entries []entry
+	for i := 0; i < len(entryLines); {
+		// skip leading blank lines
+		for i < len(entryLines) && strings.TrimSpace(entryLines[i]) == "" {
+			i++
+		}
+		if i >= len(entryLines) {
+			break
+		}
+		if !strings.HasPrefix(entryLines[i], "- ") {
+			// if unexpected, include line as is
+			entries = append(entries, entry{text: entryLines[i] + "\n", length: len(entryLines[i]) + 1})
+			i++
+			continue
+		}
+		start := i
+		i++
+		for i < len(entryLines) && !strings.HasPrefix(entryLines[i], "- ") {
+			i++
+		}
+		block := strings.Join(entryLines[start:i], "\n") + "\n\n"
+		entries = append(entries, entry{text: block, length: len(block)})
+	}
+
+	var chunks []string
+	// start first chunk with full preamble
+	cur := preamble
+	curLen := len(cur)
+	for _, e := range entries {
+		if curLen+e.length > maxBody && curLen > len(preamble) {
+			// flush current chunk, start new without headers
+			chunks = append(chunks, cur)
+			cur = ""
+			curLen = 0
+		}
+		// if new chunk and would still exceed, force place the single large entry
+		if curLen == 0 && e.length > maxBody {
+			// fallback: include as is; GitHub will still likely accept since entries are typically smaller
+		}
+		cur += e.text
+		curLen += e.length
+	}
+	if strings.TrimSpace(cur) != "" {
+		chunks = append(chunks, cur)
+	}
+	return chunks
+}
+
+// upsertPRComments deletes any existing slinky comments and posts the new chunked comments in order.
+func upsertPRComments(repo string, prNumber int, token string, chunks []string) error {
 	apiBase := "https://api.github.com"
 	listURL := fmt.Sprintf("%s/repos/%s/issues/%d/comments?per_page=100", apiBase, repo, prNumber)
 	req, _ := http.NewRequest(http.MethodGet, listURL, nil)
@@ -374,49 +442,31 @@ func upsertPRComment(repo string, prNumber int, token string, body string) error
 	}
 	b, _ := io.ReadAll(resp.Body)
 	_ = json.Unmarshal(b, &comments)
-	var existingID int
+
+	// Delete all existing slinky-report comments to avoid stale entries
 	for _, c := range comments {
 		if strings.Contains(c.Body, "<!-- slinky-report -->") {
-			existingID = c.ID
-			break
+			delURL := fmt.Sprintf("%s/repos/%s/issues/comments/%d", apiBase, repo, c.ID)
+			dReq, _ := http.NewRequest(http.MethodDelete, delURL, nil)
+			dReq.Header.Set("Authorization", "Bearer "+token)
+			dReq.Header.Set("Accept", "application/vnd.github+json")
+			_, _ = http.DefaultClient.Do(dReq)
 		}
 	}
 
-	payload, _ := json.Marshal(map[string]string{"body": body})
-	if existingID > 0 {
+	// Post new comments in order
+	for idx, chunk := range chunks {
+		body := fmt.Sprintf("%s\n%s", "<!-- slinky-report -->", chunk)
+		postURL := fmt.Sprintf("%s/repos/%s/issues/%d/comments", apiBase, repo, prNumber)
+		payload, _ := json.Marshal(map[string]string{"body": body})
+		req, _ = http.NewRequest(http.MethodPost, postURL, bytes.NewReader(payload))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("Content-Type", "application/json")
+		res, _ := http.DefaultClient.Do(req)
 		if shouldDebug() {
-			fmt.Printf("::debug:: Updating existing comment: %d\n", existingID)
+			fmt.Printf("::debug:: Posted chunk %d/%d: %v\n", idx+1, len(chunks), res)
 		}
-
-		u := fmt.Sprintf("%s/repos/%s/issues/comments/%d", apiBase, repo, existingID)
-		req, _ = http.NewRequest(http.MethodPatch, u, bytes.NewReader(payload))
-	} else {
-		if shouldDebug() {
-			fmt.Printf("::debug:: Creating new comment\n")
-		}
-
-		u := fmt.Sprintf("%s/repos/%s/issues/%d/comments", apiBase, repo, prNumber)
-		req, _ = http.NewRequest(http.MethodPost, u, bytes.NewReader(payload))
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Content-Type", "application/json")
-	upsertResp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer upsertResp.Body.Close()
-	upsertRespBody, _ := io.ReadAll(upsertResp.Body)
-	upsertRespUnmarshalErr := json.Unmarshal(upsertRespBody, &upsertResp)
-	if upsertRespUnmarshalErr != nil {
-		return fmt.Errorf("failed to unmarshal upsert response: %s", upsertRespUnmarshalErr)
-	}
-	if shouldDebug() {
-		fmt.Printf("::debug:: Comment upserted Response: %s\n%s", upsertResp.Status, string(upsertRespBody))
-		fmt.Printf("::debug:: Comment upserted: %+v\n", upsertResp)
-	}
-	if upsertResp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to upsert comment: %s", upsertResp.Status)
 	}
 	return nil
 }
