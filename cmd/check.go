@@ -407,7 +407,7 @@ func chunkMarkdownByURL(body string) []string {
 		for i < len(entryLines) && !strings.HasPrefix(entryLines[i], "- ") {
 			i++
 		}
-		block := strings.Join(entryLines[start:i], "\n") + "\n\n"
+		block := strings.Join(entryLines[start:i], "\n") + "\n"
 		entries = append(entries, entry{text: block, length: len(block)})
 	}
 

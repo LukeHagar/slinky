@@ -89,9 +89,9 @@ func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[st
 
 	// Walk the filesystem
 	walkFn := func(path string, d os.DirEntry, err error) error {
-		if isDebugEnv() {
-			fmt.Printf("::debug:: Walking path: %s\n", path)
-		}
+		// if isDebugEnv() {
+		// 	fmt.Printf("::debug:: Walking path: %s\n", path)
+		// }
 
 		if err != nil {
 			return nil
@@ -123,11 +123,6 @@ func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[st
 		}
 		if !shouldInclude(rel) {
 			return nil
-		}
-
-		// Debug: announce file being parsed; GitHub shows ::debug only in debug runs
-		if isDebugEnv() {
-			fmt.Printf("::debug:: Scanned File: %s\n", rel)
 		}
 
 		f, ferr := os.Open(path)
@@ -474,10 +469,6 @@ func trimDelimiters(s string) string {
 		s = trimTrailingDelimiters(s)
 	}
 	return s
-}
-
-func extractCandidates(rel string, content string) []string {
-	return nil
 }
 
 // matchCandidate holds a URL and its byte offset within the content
