@@ -578,38 +578,88 @@ func extractCandidateMatches(content string) []matchCandidate {
 func loadGitIgnore(root string) *ignore.GitIgnore {
 	var lines []string
 	gi := filepath.Join(root, ".gitignore")
+	if isDebugEnv() {
+		fmt.Printf("::debug:: Checking for .gitignore at: %s\n", gi)
+	}
+	if _, err := os.Stat(gi); err != nil {
+		if isDebugEnv() {
+			fmt.Printf("::debug:: .gitignore not found at: %s\n", gi)
+		}
+		return nil
+	}
+	if isDebugEnv() {
+		fmt.Printf("::debug:: Reading .gitignore from: %s\n", gi)
+	}
 	if b, err := os.ReadFile(gi); err == nil {
-		for _, ln := range strings.Split(string(b), "\n") {
+		for ln := range strings.SplitSeq(string(b), "\n") {
 			lines = append(lines, ln)
 		}
 	}
 	ge := filepath.Join(root, ".git", "info", "exclude")
+	if isDebugEnv() {
+		fmt.Printf("::debug:: Checking for .git/info/exclude at: %s\n", ge)
+	}
+	if _, err := os.Stat(ge); err != nil {
+		if isDebugEnv() {
+			fmt.Printf("::debug:: .git/info/exclude not found at: %s\n", ge)
+		}
+		return nil
+	}
+	if isDebugEnv() {
+		fmt.Printf("::debug:: Reading .git/info/exclude from: %s\n", ge)
+	}
 	if b, err := os.ReadFile(ge); err == nil {
-		for _, ln := range strings.Split(string(b), "\n") {
+		for ln := range strings.SplitSeq(string(b), "\n") {
 			lines = append(lines, ln)
 		}
 	}
 	if len(lines) == 0 {
+		if isDebugEnv() {
+			fmt.Printf("::debug:: .gitignore or .git/info/exclude is empty\n")
+		}
 		return nil
+	}
+	if isDebugEnv() {
+		fmt.Printf("::debug:: Compiling .gitignore and .git/info/exclude\n")
 	}
 	return ignore.CompileIgnoreLines(lines...)
 }
 
 // .slinkignore support
 type slinkyIgnore struct {
-	IgnorePaths []string `json:"ignorePaths"`
-	IgnoreURLs  []string `json:"ignoreURLs"`
+	IgnorePaths []string `json:"ignorePaths" optional:"true"`
+	IgnoreURLs  []string `json:"ignoreURLs" optional:"true"`
 }
 
 func loadSlinkyIgnore(root string) (*ignore.GitIgnore, []string) {
 	cfgPath := filepath.Join(root, ".slinkignore")
+	if isDebugEnv() {
+		fmt.Printf("::debug:: Checking for .slinkignore at: %s\n", cfgPath)
+	}
+	if _, err := os.Stat(cfgPath); err != nil {
+		if isDebugEnv() {
+			fmt.Printf("::debug:: .slinkignore not found at: %s\n", cfgPath)
+		}
+		return nil, nil
+	}
+	if isDebugEnv() {
+		fmt.Printf("::debug:: Reading .slinkignore from: %s\n", cfgPath)
+	}
 	b, err := os.ReadFile(cfgPath)
 	if err != nil || len(b) == 0 {
+		if isDebugEnv() {
+			fmt.Printf("::debug:: .slinkignore is empty or not found at: %s\n", cfgPath)
+		}
 		return nil, nil
 	}
 	var cfg slinkyIgnore
 	if jerr := json.Unmarshal(b, &cfg); jerr != nil {
 		return nil, nil
+	}
+	if isDebugEnv() {
+		fmt.Printf("::debug:: Loaded .slinkignore from: %s\n", cfgPath)
+		fmt.Printf("::debug:: IgnorePaths: %v\n", cfg.IgnorePaths)
+		fmt.Printf("::debug:: IgnoreURLs: %v\n", cfg.IgnoreURLs)
 	}
 	var ign *ignore.GitIgnore
 	if len(cfg.IgnorePaths) > 0 {

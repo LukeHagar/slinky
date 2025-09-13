@@ -40,7 +40,7 @@ func init() {
 			// Parse targets: allow comma-separated chunks
 			var raw []string
 			for _, a := range args {
-				for _, part := range strings.Split(a, ",") {
+				for part := range strings.SplitSeq(a, ",") {
 					p := strings.TrimSpace(part)
 					if p != "" {
 						raw = append(raw, toSlash(p))
@@ -115,6 +115,7 @@ func init() {
 				}
 				merge(res, "", true)
 			}
+
 			// 2) Collect for each concrete root
 			for _, r := range roots {
 				clean := toSlash(filepath.Clean(r.path))
