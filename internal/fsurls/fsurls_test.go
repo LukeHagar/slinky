@@ -57,6 +57,17 @@ func TestCollectURLs_FromTestFiles(t *testing.T) {
 			t.Fatalf("expected API URL %s to be ignored via .slinkignore", u)
 		}
 	}
+	// URLs matching *acme* should be ignored
+	acmeSamples := []string{
+		"https://acme.com/logout",
+		"http://sub.acme.example/logout",
+		"https://docs.acme.dev",
+	}
+	for _, u := range acmeSamples {
+		if _, ok := urls[u]; ok {
+			t.Fatalf("expected %s to be ignored via *acme* pattern", u)
+		}
+	}
 
 	// Verify .slinkignore path ignores: file under ignore-me should not contribute
 	for u, files := range urls {

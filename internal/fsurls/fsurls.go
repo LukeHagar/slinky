@@ -682,18 +682,34 @@ func isURLIgnored(u string, patterns []string) bool {
 	if len(patterns) == 0 {
 		return false
 	}
-	for _, p := range patterns {
+	for _, raw := range patterns {
+		p := strings.TrimSpace(raw)
 		if p == "" {
 			continue
 		}
-		// simple contains or wildcard suffix/prefix match
-		if p == u || strings.Contains(u, p) {
+		// No wildcards: exact or substring match
+		if !strings.ContainsAny(p, "*?") {
+			if u == p || strings.Contains(u, p) {
+				return true
+			}
+			continue
+		}
+		// Glob-style: allow '*' to span slashes by converting '*' -> '**'
+		dsPat := strings.ReplaceAll(p, "*", "**")
+		if ok, _ := doublestar.PathMatch(dsPat, u); ok {
 			return true
 		}
-		// doublestar path-like match for full URL string
-		if ok, _ := doublestar.PathMatch(p, u); ok {
+		// Regex fallback: '*' -> '.*', '?' -> '.'
+		if re, err := wildcardToRegex(p); err == nil && re.MatchString(u) {
 			return true
 		}
 	}
 	return false
+}
+
+func wildcardToRegex(pattern string) (*regexp.Regexp, error) {
+	escaped := regexp.QuoteMeta(pattern)
+	escaped = strings.ReplaceAll(escaped, "\\*", ".*")
+	escaped = strings.ReplaceAll(escaped, "\\?", ".")
+	return regexp.Compile("^" + escaped + "$")
 }
