@@ -649,7 +649,28 @@ func loadSlinkyIgnore(root string) (*ignore.GitIgnore, []string) {
 	}
 	var ign *ignore.GitIgnore
 	if len(cfg.IgnorePaths) > 0 {
-		ign = ignore.CompileIgnoreLines(cfg.IgnorePaths...)
+		var lines []string
+		for _, p := range cfg.IgnorePaths {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			lines = append(lines, p)
+			// Add a recursive variant to match anywhere
+			if !strings.HasPrefix(p, "**/") {
+				lines = append(lines, "**/"+p)
+			}
+			// If likely a directory name, add a catch-all under it
+			base := strings.TrimSuffix(p, "/")
+			if base != "" && !strings.ContainsAny(base, "*?[]") {
+				// Heuristic: directory-like if it has no '.' in the last segment or explicitly ends with '/'
+				last := filepath.Base(base)
+				if strings.HasSuffix(p, "/") || !strings.Contains(last, ".") {
+					lines = append(lines, "**/"+base+"/**")
+				}
+			}
+		}
+		ign = ignore.CompileIgnoreLines(lines...)
 	}
 	var urlPatterns []string
 	for _, p := range cfg.IgnoreURLs {
