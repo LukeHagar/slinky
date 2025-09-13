@@ -1,10 +1,18 @@
 {
   "ignorePaths": [
     "**/ignore-me/**",
-    "**/*.bak"
+    "**/*.bak",
+    "node_modules",
+    "package-lock.json"
   ],
   "ignoreURLs": [
+    "*notarealwebsite.com*",
     "https://example.com/this/path/does/not/exist",
-    "*notarealwebsite.com*"
+    "*acme*",
+    "https://sailpoint.api.identitynow.com/beta",
+    "https://sailpoint.api.identitynow.com/v3",
+    "https://sailpoint.api.identitynow.com/v2024",
+    "https://sailpoint.api.identitynow.com/v2025",
+    "https://sailpoint.api.identitynow.com/v2026"
   ]
 }

@@ -44,11 +44,24 @@ func TestCollectURLs_FromTestFiles(t *testing.T) {
 	if _, ok := urls["https://example.com/this/path/does/not/exist"]; ok {
 		t.Fatalf("expected URL ignored by .slinkignore to be absent")
 	}
+	// Ignore sailpoint api variants
+	ignoredAPIs := []string{
+		"https://sailpoint.api.identitynow.com/beta",
+		"https://sailpoint.api.identitynow.com/v3",
+		"https://sailpoint.api.identitynow.com/v2024",
+		"https://sailpoint.api.identitynow.com/v2025",
+		"https://sailpoint.api.identitynow.com/v2026",
+	}
+	for _, u := range ignoredAPIs {
+		if _, ok := urls[u]; ok {
+			t.Fatalf("expected API URL %s to be ignored via .slinkignore", u)
+		}
+	}
 
 	// Verify .slinkignore path ignores: file under ignore-me should not contribute
 	for u, files := range urls {
 		for _, f := range files {
-			if strings.Contains(f, "ignore-me/") {
+			if strings.Contains(f, "ignore-me/") || strings.Contains(f, "node_modules/") || strings.HasSuffix(f, "package-lock.json") {
 				t.Fatalf("file %s should have been ignored via .slinkignore, but contributed to URL %s", f, u)
 			}
 		}

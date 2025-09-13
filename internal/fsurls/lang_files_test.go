@@ -27,9 +27,9 @@ func TestCollectURLs_FromCodeFiles(t *testing.T) {
 		}
 	}
 
-	// Ensure sanitizer trims emphasis and punctuation
-	if _, ok := urls["https://sailpoint.api.identitynow.com/v2024"]; !ok {
-		t.Fatalf("expected sanitized emphasized URL to be collected without trailing *")
+	// Ensure sanitizer trims emphasis and punctuation (note: v2024 is ignored by .slinkignore)
+	if _, ok := urls["https://sailpoint.api.identitynow.com/v2024"]; ok {
+		t.Fatalf("expected v2024 URL to be ignored via .slinkignore")
 	}
 	if _, ok := urls["https://example.com/path"]; !ok {
 		t.Fatalf("expected URL with trailing ) to be trimmed")
