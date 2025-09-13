@@ -145,10 +145,24 @@ func WriteMarkdown(path string, results []web.Result, s Summary) (string, error)
 		}
 		sort.Strings(files)
 		for _, fn := range files {
-			if strings.TrimSpace(s.RepoBlobBaseURL) != "" {
-				buf.WriteString(fmt.Sprintf("  - [%s](%s/%s)\n", escapeMD(fn), strings.TrimRight(s.RepoBlobBaseURL, "/"), escapeLinkPath(fn)))
+			display := fn
+			linkPath := fn
+			if parts := strings.Split(fn, "|"); len(parts) >= 2 {
+				p := parts[0]
+				line := strings.TrimSpace(parts[1])
+				display = p
+				if line != "" {
+					linkPath = fmt.Sprintf("%s#L%s", escapeLinkPath(p), line)
+				} else {
+					linkPath = escapeLinkPath(p)
+				}
 			} else {
-				buf.WriteString(fmt.Sprintf("  - [%s](./%s)\n", escapeMD(fn), escapeLinkPath(fn)))
+				linkPath = escapeLinkPath(linkPath)
+			}
+			if strings.TrimSpace(s.RepoBlobBaseURL) != "" {
+				buf.WriteString(fmt.Sprintf("  - [%s](%s/%s)\n", escapeMD(display), strings.TrimRight(s.RepoBlobBaseURL, "/"), linkPath))
+			} else {
+				buf.WriteString(fmt.Sprintf("  - [%s](./%s)\n", escapeMD(display), linkPath))
 			}
 		}
 	}

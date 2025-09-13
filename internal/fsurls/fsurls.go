@@ -24,10 +24,6 @@ var quotedURLRegex = regexp.MustCompile(`(?i)"(https?://[^"\s]+)"|'(https?://[^'
 var htmlHrefRegex = regexp.MustCompile(`(?i)href\s*=\s*"([^"]+)"|href\s*=\s*'([^']+)'`)
 var htmlSrcRegex = regexp.MustCompile(`(?i)src\s*=\s*"([^"]+)"|src\s*=\s*'([^']+)'`)
 
-// Markdown code sections to ignore when extracting autolinks
-var mdFencedCodeRegex = regexp.MustCompile("(?s)```[\\s\\S]*?```")
-var mdInlineCodeRegex = regexp.MustCompile("`[^`]+`")
-
 // Strict hostname validation: labels 1-63 chars, alnum & hyphen, not start/end hyphen, at least one dot, simple TLD
 var hostnameRegex = regexp.MustCompile(`^(?i)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
 
@@ -160,24 +156,26 @@ func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[st
 			return nil
 		}
 
-		candidates := extractCandidates(rel, content)
-		if len(candidates) == 0 {
+		matches := extractCandidateMatches(content)
+		if len(matches) == 0 {
 			return nil
 		}
-		for _, raw := range candidates {
-			u := sanitizeURLToken(raw)
+		for _, m := range matches {
+			u := sanitizeURLToken(m.URL)
 			if u == "" {
 				continue
 			}
 			if isURLIgnored(u, slURLPatterns) {
 				continue
 			}
+			line, col := computeLineCol(content, m.Offset)
+			source := fmt.Sprintf("%s|%d|%d", rel, line, col)
 			fileSet, ok := urlToFiles[u]
 			if !ok {
 				fileSet = make(map[string]struct{})
 				urlToFiles[u] = fileSet
 			}
-			fileSet[rel] = struct{}{}
+			fileSet[source] = struct{}{}
 		}
 		return nil
 	}
@@ -301,24 +299,26 @@ func CollectURLsProgress(rootPath string, globs []string, respectGitignore bool,
 			return nil
 		}
 
-		candidates := extractCandidates(rel, content)
-		if len(candidates) == 0 {
+		matches := extractCandidateMatches(content)
+		if len(matches) == 0 {
 			return nil
 		}
-		for _, raw := range candidates {
-			u := sanitizeURLToken(raw)
+		for _, m := range matches {
+			u := sanitizeURLToken(m.URL)
 			if u == "" {
 				continue
 			}
 			if isURLIgnored(u, slURLPatterns) {
 				continue
 			}
+			line, col := computeLineCol(content, m.Offset)
+			source := fmt.Sprintf("%s|%d|%d", rel, line, col)
 			fileSet, ok := urlToFiles[u]
 			if !ok {
 				fileSet = make(map[string]struct{})
 				urlToFiles[u] = fileSet
 			}
-			fileSet[rel] = struct{}{}
+			fileSet[source] = struct{}{}
 		}
 		return nil
 	}
@@ -477,75 +477,101 @@ func trimDelimiters(s string) string {
 }
 
 func extractCandidates(rel string, content string) []string {
-	var out []string
+	return nil
+}
 
-	lowerRel := strings.ToLower(rel)
-	ext := strings.ToLower(filepath.Ext(lowerRel))
+// matchCandidate holds a URL and its byte offset within the content
+type matchCandidate struct {
+	URL    string
+	Offset int
+}
 
-	appendFromDual := func(matches [][]string) {
-		for _, m := range matches {
-			if len(m) > 2 {
-				if m[1] != "" {
-					out = append(out, m[1])
-				} else if m[2] != "" {
-					out = append(out, m[2])
-				}
+// computeLineCol returns 1-based line and column given a byte offset
+func computeLineCol(content string, offset int) (int, int) {
+	if offset < 0 {
+		return 1, 1
+	}
+	if offset > len(content) {
+		offset = len(content)
+	}
+	line := 1
+	col := 1
+	for i := 0; i < offset; i++ {
+		if content[i] == '\n' {
+			line++
+			col = 1
+		} else {
+			col++
+		}
+	}
+	return line, col
+}
+
+// extractCandidateMatches finds URL-like tokens with their offsets for line/col mapping
+func extractCandidateMatches(content string) []matchCandidate {
+	var out []matchCandidate
+	// Markdown links: capture group 1 is the URL inside (...)
+	if subs := mdLinkRegex.FindAllStringSubmatchIndex(content, -1); len(subs) > 0 {
+		for _, idx := range subs {
+			if len(idx) >= 4 && idx[2] >= 0 && idx[3] >= 0 {
+				url := content[idx[2]:idx[3]]
+				out = append(out, matchCandidate{URL: url, Offset: idx[2]})
 			}
 		}
 	}
-
-	isMarkdown := ext == ".md" || ext == ".markdown" || ext == ".mdx"
-	isHTML := ext == ".html" || ext == ".htm" || ext == ".xhtml"
-
-	switch {
-	case isMarkdown:
-		// Remove fenced and inline code before scanning for URLs
-		withoutFences := mdFencedCodeRegex.ReplaceAllString(content, "")
-		withoutInline := mdInlineCodeRegex.ReplaceAllString(withoutFences, "")
-
-		for _, m := range mdLinkRegex.FindAllStringSubmatch(withoutInline, -1) {
-			if len(m) > 1 {
-				out = append(out, m[1])
+	// HTML href
+	if subs := htmlHrefRegex.FindAllStringSubmatchIndex(content, -1); len(subs) > 0 {
+		for _, idx := range subs {
+			// groups 1 and 2 are alternatives
+			if len(idx) >= 4 && idx[2] >= 0 && idx[3] >= 0 {
+				url := content[idx[2]:idx[3]]
+				out = append(out, matchCandidate{URL: url, Offset: idx[2]})
+			} else if len(idx) >= 6 && idx[4] >= 0 && idx[5] >= 0 {
+				url := content[idx[4]:idx[5]]
+				out = append(out, matchCandidate{URL: url, Offset: idx[4]})
 			}
 		}
-		for _, m := range angleURLRegex.FindAllStringSubmatch(withoutInline, -1) {
-			if len(m) > 1 {
-				out = append(out, m[1])
-			}
-		}
-		for _, m := range quotedURLRegex.FindAllStringSubmatch(withoutInline, -1) {
-			if len(m) > 2 {
-				if m[1] != "" {
-					out = append(out, m[1])
-				} else if m[2] != "" {
-					out = append(out, m[2])
-				}
-			}
-		}
-		out = append(out, bareURLRegex.FindAllString(withoutInline, -1)...)
-
-	case isHTML:
-		appendFromDual(htmlHrefRegex.FindAllStringSubmatch(content, -1))
-		appendFromDual(htmlSrcRegex.FindAllStringSubmatch(content, -1))
-
-	default:
-		for _, m := range angleURLRegex.FindAllStringSubmatch(content, -1) {
-			if len(m) > 1 {
-				out = append(out, m[1])
-			}
-		}
-		for _, m := range quotedURLRegex.FindAllStringSubmatch(content, -1) {
-			if len(m) > 2 {
-				if m[1] != "" {
-					out = append(out, m[1])
-				} else if m[2] != "" {
-					out = append(out, m[2])
-				}
-			}
-		}
-		out = append(out, bareURLRegex.FindAllString(content, -1)...)
 	}
-
+	// HTML src
+	if subs := htmlSrcRegex.FindAllStringSubmatchIndex(content, -1); len(subs) > 0 {
+		for _, idx := range subs {
+			if len(idx) >= 4 && idx[2] >= 0 && idx[3] >= 0 {
+				url := content[idx[2]:idx[3]]
+				out = append(out, matchCandidate{URL: url, Offset: idx[2]})
+			} else if len(idx) >= 6 && idx[4] >= 0 && idx[5] >= 0 {
+				url := content[idx[4]:idx[5]]
+				out = append(out, matchCandidate{URL: url, Offset: idx[4]})
+			}
+		}
+	}
+	// Angle autolinks <http://...>
+	if subs := angleURLRegex.FindAllStringSubmatchIndex(content, -1); len(subs) > 0 {
+		for _, idx := range subs {
+			if len(idx) >= 4 && idx[2] >= 0 && idx[3] >= 0 {
+				url := content[idx[2]:idx[3]]
+				out = append(out, matchCandidate{URL: url, Offset: idx[2]})
+			}
+		}
+	}
+	// Quoted URLs
+	if subs := quotedURLRegex.FindAllStringSubmatchIndex(content, -1); len(subs) > 0 {
+		for _, idx := range subs {
+			if len(idx) >= 4 && idx[2] >= 0 && idx[3] >= 0 {
+				url := content[idx[2]:idx[3]]
+				out = append(out, matchCandidate{URL: url, Offset: idx[2]})
+			} else if len(idx) >= 6 && idx[4] >= 0 && idx[5] >= 0 {
+				url := content[idx[4]:idx[5]]
+				out = append(out, matchCandidate{URL: url, Offset: idx[4]})
+			}
+		}
+	}
+	// Bare URLs
+	if spans := bareURLRegex.FindAllStringIndex(content, -1); len(spans) > 0 {
+		for _, sp := range spans {
+			url := content[sp[0]:sp[1]]
+			out = append(out, matchCandidate{URL: url, Offset: sp[0]})
+		}
+	}
 	return out
 }
 
