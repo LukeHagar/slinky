@@ -623,32 +623,27 @@ type slinkyIgnore struct {
 }
 
 func loadSlinkyIgnore(root string) (*ignore.GitIgnore, []string) {
-	cfgPath := filepath.Join(root, ".slinkignore")
-	if isDebugEnv() {
-		fmt.Printf("::debug:: Checking for .slinkignore at: %s\n", cfgPath)
-	}
-	if _, err := os.Stat(cfgPath); err != nil {
-		if isDebugEnv() {
-			fmt.Printf("::debug:: .slinkignore not found at: %s\n", cfgPath)
-		}
+	cfgPath := findSlinkyConfig(root)
+	if cfgPath == "" {
 		return nil, nil
-	}
-	if isDebugEnv() {
-		fmt.Printf("::debug:: Reading .slinkignore from: %s\n", cfgPath)
 	}
 	b, err := os.ReadFile(cfgPath)
 	if err != nil || len(b) == 0 {
-		if isDebugEnv() {
-			fmt.Printf("::debug:: .slinkignore is empty or not found at: %s\n", cfgPath)
-		}
 		return nil, nil
 	}
 	var cfg slinkyIgnore
+	// First attempt strict JSON
 	if jerr := json.Unmarshal(b, &cfg); jerr != nil {
-		return nil, nil
+		// Try a relaxed pass: strip trailing commas before ] or }
+		relaxed := regexp.MustCompile(`,\s*([}\]])`).ReplaceAll(b, []byte("$1"))
+		if jerr2 := json.Unmarshal(relaxed, &cfg); jerr2 != nil {
+			// Emit a GitHub Actions warning so users see misconfigurations
+			fmt.Printf("::warning:: Failed to parse .slinkignore at %s: %v\n", cfgPath, jerr)
+			return nil, nil
+		}
 	}
 	if isDebugEnv() {
-		fmt.Printf("::debug:: Loaded .slinkignore from: %s\n", cfgPath)
+		fmt.Println("::debug:: Loaded .slinkignore")
 		fmt.Printf("::debug:: IgnorePaths: %v\n", cfg.IgnorePaths)
 		fmt.Printf("::debug:: IgnoreURLs: %v\n", cfg.IgnoreURLs)
 	}
@@ -664,6 +659,23 @@ func loadSlinkyIgnore(root string) (*ignore.GitIgnore, []string) {
 		}
 	}
 	return ign, urlPatterns
+}
+
+// findSlinkyConfig searches upward from root for a .slinkignore file
+func findSlinkyConfig(root string) string {
+	cur := root
+	for {
+		cfg := filepath.Join(cur, ".slinkignore")
+		if st, err := os.Stat(cfg); err == nil && !st.IsDir() {
+			return cfg
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur || strings.TrimSpace(parent) == "" {
+			break
+		}
+		cur = parent
+	}
+	return ""
 }
 
 func isURLIgnored(u string, patterns []string) bool {
