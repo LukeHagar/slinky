@@ -108,6 +108,12 @@ func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[st
 			}
 			return nil
 		}
+
+		// Always skip any .slinkignore file from scanning
+		if filepath.Base(path) == ".slinkignore" || rel == ".slinkignore" || strings.HasSuffix(rel, "/.slinkignore") {
+			return nil
+		}
+
 		if (ign != nil && ign.MatchesPath(rel)) || (slPathIgnore != nil && slPathIgnore.MatchesPath(rel)) {
 			return nil
 		}
@@ -247,6 +253,10 @@ func CollectURLsProgress(rootPath string, globs []string, respectGitignore bool,
 			if base == ".git" {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+		// Always skip any .slinkignore file from scanning
+		if filepath.Base(path) == ".slinkignore" || rel == ".slinkignore" || strings.HasSuffix(rel, "/.slinkignore") {
 			return nil
 		}
 		if (ign != nil && ign.MatchesPath(rel)) || (slPathIgnore != nil && slPathIgnore.MatchesPath(rel)) {
