@@ -63,8 +63,8 @@ func CheckURLs(ctx context.Context, urls []string, sources map[string][]string, 
 			if resp != nil && resp.Body != nil {
 				resp.Body.Close()
 			}
-			// Treat 401/403/408 as valid links
-			if status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusRequestTimeout {
+			// Treat 401/403/408/429 as valid links
+			if status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusRequestTimeout || status == http.StatusTooManyRequests {
 				ok = true
 				err = nil
 			}
