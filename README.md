@@ -21,12 +21,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run Slinky
         uses: LukeHagar/slinky@v1
+        with:
+          targets: "docs/,README.md,**/*.md"
 ```
 
 ### Inputs
 
-- **path**: Root path to scan. Default: `.`
-- **patterns**: Comma-separated doublestar patterns (e.g. `docs/**/*.md,**/*.go`). Default: `**/*`
+- **targets**: Comma-separated paths and patterns to scan. Can be directories, files, or glob patterns (e.g. `docs/,api-specs/**/*.yaml,README.md`). Default: `**/*`
 - **concurrency**: Max concurrent requests. Default: `16`
 - **timeout**: HTTP timeout seconds. Default: `10`
 - **json-out**: Optional JSON results path. Default: `results.json`
@@ -62,7 +63,6 @@ slinky run **/*
 Notes:
 - Targets can be files, directories, or doublestar globs. Multiple targets are allowed.
 - If no targets are provided, the default is `**/*` relative to the current working directory.
-- Legacy flags `--glob` and `--patterns` are still supported, but positional targets are preferred.
 
 ### Notes
 
