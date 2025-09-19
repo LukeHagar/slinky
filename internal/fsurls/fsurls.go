@@ -115,6 +115,9 @@ func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[st
 		}
 
 		if (ign != nil && ign.MatchesPath(rel)) || (slPathIgnore != nil && slPathIgnore.MatchesPath(rel)) {
+			if isDebugEnv() {
+				fmt.Printf("::debug:: Ignoring file: %s\n", rel)
+			}
 			return nil
 		}
 		info, ierr := d.Info()
@@ -260,6 +263,9 @@ func CollectURLsProgress(rootPath string, globs []string, respectGitignore bool,
 			return nil
 		}
 		if (ign != nil && ign.MatchesPath(rel)) || (slPathIgnore != nil && slPathIgnore.MatchesPath(rel)) {
+			if isDebugEnv() {
+				fmt.Printf("::debug:: Ignoring file: %s\n", rel)
+			}
 			return nil
 		}
 		info, ierr := d.Info()
@@ -680,7 +686,13 @@ func loadSlinkyIgnore(root string) (*ignore.GitIgnore, []string) {
 				}
 			}
 		}
+		if isDebugEnv() {
+			fmt.Printf("::debug:: Compiled ignore patterns: %v\n", lines)
+		}
 		ign = ignore.CompileIgnoreLines(lines...)
+		if isDebugEnv() {
+			fmt.Printf("::debug:: Ignore matcher created successfully\n")
+		}
 	}
 	var urlPatterns []string
 	for _, p := range cfg.IgnoreURLs {
@@ -698,6 +710,9 @@ func findSlinkyConfig(root string) string {
 	for {
 		cfg := filepath.Join(cur, ".slinkignore")
 		if st, err := os.Stat(cfg); err == nil && !st.IsDir() {
+			if isDebugEnv() {
+				fmt.Printf("::debug:: Found .slinkignore at: %s\n", cfg)
+			}
 			return cfg
 		}
 		parent := filepath.Dir(cur)
@@ -705,6 +720,9 @@ func findSlinkyConfig(root string) string {
 			break
 		}
 		cur = parent
+	}
+	if isDebugEnv() {
+		fmt.Printf("::debug:: No .slinkignore file found starting from: %s\n", root)
 	}
 	return ""
 }
