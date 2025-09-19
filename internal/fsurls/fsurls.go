@@ -196,6 +196,9 @@ func CollectURLsWithIgnoreConfig(rootPath string, globs []string, respectGitigno
 
 	// Walk the filesystem
 	walkFn := func(path string, d os.DirEntry, err error) error {
+		if isDebugEnv() {
+			fmt.Printf("::debug:: Walking path: %s\n", path)
+		}
 
 		if err != nil {
 			return nil
@@ -366,6 +369,9 @@ func CollectURLsProgressWithIgnoreConfig(rootPath string, globs []string, respec
 	const maxSize = 2 * 1024 * 1024
 
 	walkFn := func(path string, d os.DirEntry, err error) error {
+		if isDebugEnv() {
+			fmt.Printf("::debug:: Walking path: %s\n", path)
+		}
 
 		if err != nil {
 			return nil
@@ -919,6 +925,9 @@ func CollectURLsV2(rootPath string, globs []string, respectGitignore bool, ignor
 
 	// Walk the filesystem
 	walkFn := func(path string, d os.DirEntry, err error) error {
+		if isDebugEnv() {
+			fmt.Printf("::debug:: Walking path: %s\n", path)
+		}
 
 		if err != nil {
 			return nil
