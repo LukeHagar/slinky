@@ -203,6 +203,14 @@ func CollectURLsWithIgnoreConfig(rootPath string, globs []string, respectGitigno
 		if err != nil {
 			return nil
 		}
+
+		if (ign != nil && ign.MatchesPath(path)) || (slPathIgnore != nil && slPathIgnore.MatchesPath(path)) {
+			if isDebugEnv() {
+				fmt.Printf("::debug:: Ignoring path: %s\n", path)
+			}
+			return nil
+		}
+
 		rel, rerr := filepath.Rel(cleanRoot, path)
 		if rerr != nil {
 			rel = path
@@ -218,13 +226,6 @@ func CollectURLsWithIgnoreConfig(rootPath string, globs []string, respectGitigno
 
 		// Always skip any .slinkignore file from scanning
 		if filepath.Base(path) == ".slinkignore" || rel == ".slinkignore" || strings.HasSuffix(rel, "/.slinkignore") {
-			return nil
-		}
-
-		if (ign != nil && ign.MatchesPath(rel)) || (slPathIgnore != nil && slPathIgnore.MatchesPath(rel)) {
-			if isDebugEnv() {
-				fmt.Printf("::debug:: Ignoring file: %s\n", rel)
-			}
 			return nil
 		}
 		info, ierr := d.Info()
