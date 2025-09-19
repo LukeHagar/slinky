@@ -45,6 +45,18 @@ func isDebugEnv() bool {
 // If globs is empty, all files are considered. Respects .gitignore if present and respectGitignore=true.
 // Returns a map from URL -> sorted unique list of file paths that contained it.
 func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[string][]string, error) {
+	return CollectURLsWithIgnore(rootPath, globs, respectGitignore, nil, nil)
+}
+
+// CollectURLsWithIgnore is like CollectURLs but accepts pre-loaded ignore configuration
+// to avoid reloading .slinkignore and .gitignore multiple times.
+func CollectURLsWithIgnore(rootPath string, globs []string, respectGitignore bool, slPathIgnore *ignore.GitIgnore, slURLPatterns []string) (map[string][]string, error) {
+	return CollectURLsWithIgnoreConfig(rootPath, globs, respectGitignore, nil, slPathIgnore, slURLPatterns)
+}
+
+// CollectURLsWithIgnoreConfig accepts all pre-loaded ignore configuration
+// to avoid reloading .gitignore and .slinkignore multiple times.
+func CollectURLsWithIgnoreConfig(rootPath string, globs []string, respectGitignore bool, gitIgnore *ignore.GitIgnore, slPathIgnore *ignore.GitIgnore, slURLPatterns []string) (map[string][]string, error) {
 	if strings.TrimSpace(rootPath) == "" {
 		rootPath = "."
 	}
@@ -55,10 +67,16 @@ func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[st
 
 	var ign *ignore.GitIgnore
 	if !isFileRoot && respectGitignore {
-		ign = loadGitIgnore(cleanRoot)
+		if gitIgnore != nil {
+			ign = gitIgnore
+		} else {
+			ign = LoadGitIgnore(cleanRoot)
+		}
 	}
-	// Load optional .slinkignore config
-	slPathIgnore, slURLPatterns := loadSlinkyIgnore(cleanRoot)
+	// Load optional .slinkignore config if not provided
+	if slPathIgnore == nil {
+		slPathIgnore, slURLPatterns = LoadSlinkyIgnore(cleanRoot)
+	}
 
 	var patterns []string
 	for _, g := range globs {
@@ -201,6 +219,18 @@ func CollectURLs(rootPath string, globs []string, respectGitignore bool) (map[st
 
 // CollectURLsProgress is like CollectURLs but invokes onFile(relPath) for each included file.
 func CollectURLsProgress(rootPath string, globs []string, respectGitignore bool, onFile func(string)) (map[string][]string, error) {
+	return CollectURLsProgressWithIgnore(rootPath, globs, respectGitignore, onFile, nil, nil)
+}
+
+// CollectURLsProgressWithIgnore is like CollectURLsProgress but accepts pre-loaded ignore configuration
+// to avoid reloading .slinkignore and .gitignore multiple times.
+func CollectURLsProgressWithIgnore(rootPath string, globs []string, respectGitignore bool, onFile func(string), slPathIgnore *ignore.GitIgnore, slURLPatterns []string) (map[string][]string, error) {
+	return CollectURLsProgressWithIgnoreConfig(rootPath, globs, respectGitignore, onFile, nil, slPathIgnore, slURLPatterns)
+}
+
+// CollectURLsProgressWithIgnoreConfig accepts all pre-loaded ignore configuration
+// to avoid reloading .gitignore and .slinkignore multiple times.
+func CollectURLsProgressWithIgnoreConfig(rootPath string, globs []string, respectGitignore bool, onFile func(string), gitIgnore *ignore.GitIgnore, slPathIgnore *ignore.GitIgnore, slURLPatterns []string) (map[string][]string, error) {
 	if strings.TrimSpace(rootPath) == "" {
 		rootPath = "."
 	}
@@ -211,9 +241,16 @@ func CollectURLsProgress(rootPath string, globs []string, respectGitignore bool,
 
 	var ign *ignore.GitIgnore
 	if !isFileRoot && respectGitignore {
-		ign = loadGitIgnore(cleanRoot)
+		if gitIgnore != nil {
+			ign = gitIgnore
+		} else {
+			ign = LoadGitIgnore(cleanRoot)
+		}
 	}
-	slPathIgnore, slURLPatterns := loadSlinkyIgnore(cleanRoot)
+	// Load optional .slinkignore config if not provided
+	if slPathIgnore == nil {
+		slPathIgnore, slURLPatterns = LoadSlinkyIgnore(cleanRoot)
+	}
 
 	var patterns []string
 	for _, g := range globs {
@@ -582,7 +619,7 @@ func extractCandidateMatches(content string) []matchCandidate {
 	return out
 }
 
-func loadGitIgnore(root string) *ignore.GitIgnore {
+func LoadGitIgnore(root string) *ignore.GitIgnore {
 	var lines []string
 	gi := filepath.Join(root, ".gitignore")
 	if isDebugEnv() {
@@ -638,7 +675,7 @@ type slinkyIgnore struct {
 	IgnoreURLs  []string `json:"ignoreURLs" optional:"true"`
 }
 
-func loadSlinkyIgnore(root string) (*ignore.GitIgnore, []string) {
+func LoadSlinkyIgnore(root string) (*ignore.GitIgnore, []string) {
 	cfgPath := findSlinkyConfig(root)
 	if cfgPath == "" {
 		return nil, nil

@@ -83,6 +83,10 @@ func init() {
 				fmt.Printf("::debug:: Glob patterns: %s\n", strings.Join(globPatterns, ","))
 			}
 
+			// Load ignore configurations once for all targets
+			gitIgnore := fsurls.LoadGitIgnore(".")
+			slPathIgnore, slURLPatterns := fsurls.LoadSlinkyIgnore(".")
+
 			// Aggregate URL->files across all targets
 			agg := make(map[string]map[string]struct{})
 			merge := func(res map[string][]string, prefix string, isDir bool) {
@@ -109,7 +113,7 @@ func init() {
 
 			// 1) Collect for globs under current dir
 			if len(globPatterns) > 0 {
-				res, err := fsurls.CollectURLs(".", globPatterns, respectGitignore)
+				res, err := fsurls.CollectURLsWithIgnoreConfig(".", globPatterns, respectGitignore, gitIgnore, slPathIgnore, slURLPatterns)
 				if err != nil {
 					return err
 				}
@@ -120,13 +124,13 @@ func init() {
 			for _, r := range roots {
 				clean := toSlash(filepath.Clean(r.path))
 				if r.isDir {
-					res, err := fsurls.CollectURLs(r.path, []string{"**/*"}, respectGitignore)
+					res, err := fsurls.CollectURLsWithIgnoreConfig(r.path, []string{"**/*"}, respectGitignore, gitIgnore, slPathIgnore, slURLPatterns)
 					if err != nil {
 						return err
 					}
 					merge(res, clean, true)
 				} else {
-					res, err := fsurls.CollectURLs(r.path, nil, respectGitignore)
+					res, err := fsurls.CollectURLsWithIgnoreConfig(r.path, nil, respectGitignore, gitIgnore, slPathIgnore, slURLPatterns)
 					if err != nil {
 						return err
 					}
