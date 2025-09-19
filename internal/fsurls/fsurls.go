@@ -54,6 +54,95 @@ func CollectURLsWithIgnore(rootPath string, globs []string, respectGitignore boo
 	return CollectURLsWithIgnoreConfig(rootPath, globs, respectGitignore, nil, slPathIgnore, slURLPatterns)
 }
 
+// PatternMatcher handles both include and ignore patterns using doublestar
+type PatternMatcher struct {
+	includePatterns []string
+	ignorePatterns  []string
+}
+
+// NewPatternMatcher creates a new pattern matcher
+func NewPatternMatcher(includePatterns, ignorePatterns []string) *PatternMatcher {
+	return &PatternMatcher{
+		includePatterns: includePatterns,
+		ignorePatterns:  ignorePatterns,
+	}
+}
+
+// ShouldInclude checks if a path should be included based on include patterns
+func (pm *PatternMatcher) ShouldInclude(path string) bool {
+	if len(pm.includePatterns) == 0 {
+		return true
+	}
+	for _, pattern := range pm.includePatterns {
+		if ok, _ := doublestar.PathMatch(pattern, path); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// ShouldIgnore checks if a path should be ignored based on ignore patterns
+func (pm *PatternMatcher) ShouldIgnore(path string) bool {
+	for _, pattern := range pm.ignorePatterns {
+		if ok, _ := doublestar.PathMatch(pattern, path); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// ShouldIgnoreDirectory checks if a directory should be skipped entirely
+func (pm *PatternMatcher) ShouldIgnoreDirectory(path string) bool {
+	// Check if the directory path itself matches any ignore pattern
+	if pm.ShouldIgnore(path) {
+		return true
+	}
+
+	// Check if any ignore pattern would match files within this directory
+	for _, pattern := range pm.ignorePatterns {
+		// If pattern ends with /** or is a directory pattern, check if it matches this directory
+		if strings.HasSuffix(pattern, "/**") {
+			dirPattern := strings.TrimSuffix(pattern, "/**")
+			if ok, _ := doublestar.PathMatch(dirPattern, path); ok {
+				return true
+			}
+		}
+		// If pattern is a directory pattern (no file extension), check if it matches
+		if !strings.Contains(filepath.Base(pattern), ".") && !strings.ContainsAny(pattern, "*?[]") {
+			if ok, _ := doublestar.PathMatch(pattern, path); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// shouldSkipDirectory checks if a directory should be skipped based on ignore patterns
+func shouldSkipDirectory(rel string, ignorePatterns []string) bool {
+	for _, pattern := range ignorePatterns {
+		// Check if the directory path itself matches the pattern
+		if ok, _ := doublestar.PathMatch(pattern, rel); ok {
+			return true
+		}
+
+		// Check if pattern would match files within this directory
+		if strings.HasSuffix(pattern, "/**") {
+			dirPattern := strings.TrimSuffix(pattern, "/**")
+			if ok, _ := doublestar.PathMatch(dirPattern, rel); ok {
+				return true
+			}
+		}
+
+		// Check if pattern is a directory pattern (no file extension, no wildcards)
+		if !strings.Contains(filepath.Base(pattern), ".") && !strings.ContainsAny(pattern, "*?[]") {
+			if ok, _ := doublestar.PathMatch(pattern, rel); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // CollectURLsWithIgnoreConfig accepts all pre-loaded ignore configuration
 // to avoid reloading .gitignore and .slinkignore multiple times.
 func CollectURLsWithIgnoreConfig(rootPath string, globs []string, respectGitignore bool, gitIgnore *ignore.GitIgnore, slPathIgnore *ignore.GitIgnore, slURLPatterns []string) (map[string][]string, error) {
@@ -107,9 +196,9 @@ func CollectURLsWithIgnoreConfig(rootPath string, globs []string, respectGitigno
 
 	// Walk the filesystem
 	walkFn := func(path string, d os.DirEntry, err error) error {
-		// if isDebugEnv() {
-		// 	fmt.Printf("::debug:: Walking path: %s\n", path)
-		// }
+		if isDebugEnv() {
+			fmt.Printf("::debug:: Walking path: %s\n", path)
+		}
 
 		if err != nil {
 			return nil
@@ -280,6 +369,10 @@ func CollectURLsProgressWithIgnoreConfig(rootPath string, globs []string, respec
 	const maxSize = 2 * 1024 * 1024
 
 	walkFn := func(path string, d os.DirEntry, err error) error {
+		if isDebugEnv() {
+			fmt.Printf("::debug:: Walking path: %s\n", path)
+		}
+
 		if err != nil {
 			return nil
 		}
@@ -739,6 +832,225 @@ func LoadSlinkyIgnore(root string) (*ignore.GitIgnore, []string) {
 		}
 	}
 	return ign, urlPatterns
+}
+
+// LoadSlinkyIgnorePatterns loads and parses a .slinkignore file, returning ignore patterns and URL patterns
+func LoadSlinkyIgnorePatterns(root string) ([]string, []string) {
+	cfgPath := findSlinkyConfig(root)
+	if cfgPath == "" {
+		return nil, nil
+	}
+	b, err := os.ReadFile(cfgPath)
+	if err != nil || len(b) == 0 {
+		return nil, nil
+	}
+	var cfg slinkyIgnore
+	// First attempt strict JSON
+	if jerr := json.Unmarshal(b, &cfg); jerr != nil {
+		// Try a relaxed pass: strip trailing commas before ] or }
+		relaxed := regexp.MustCompile(`,\s*([}\]])`).ReplaceAll(b, []byte("$1"))
+		if jerr2 := json.Unmarshal(relaxed, &cfg); jerr2 != nil {
+			// Emit a GitHub Actions warning so users see misconfigurations
+			fmt.Printf("::warning:: Failed to parse .slinkignore at %s: %v\n", cfgPath, jerr)
+			return nil, nil
+		}
+	}
+	if isDebugEnv() {
+		fmt.Println("::debug:: Loaded .slinkignore")
+		fmt.Printf("::debug:: IgnorePaths: %v\n", cfg.IgnorePaths)
+		fmt.Printf("::debug:: IgnoreURLs: %v\n", cfg.IgnoreURLs)
+	}
+
+	// Convert patterns to doublestar format
+	var ignorePatterns []string
+	for _, p := range cfg.IgnorePaths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		ignorePatterns = append(ignorePatterns, p)
+		// Add recursive variant if it doesn't already start with **/
+		if !strings.HasPrefix(p, "**/") {
+			ignorePatterns = append(ignorePatterns, "**/"+p)
+		}
+		// If it's a directory pattern, add /** variant
+		if strings.HasSuffix(p, "/") || (!strings.Contains(filepath.Base(p), ".") && !strings.ContainsAny(p, "*?[]")) {
+			base := strings.TrimSuffix(p, "/")
+			if base != "" {
+				ignorePatterns = append(ignorePatterns, base+"/**")
+			}
+		}
+	}
+
+	var urlPatterns []string
+	for _, p := range cfg.IgnoreURLs {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			urlPatterns = append(urlPatterns, p)
+		}
+	}
+
+	if isDebugEnv() {
+		fmt.Printf("::debug:: Compiled ignore patterns: %v\n", ignorePatterns)
+	}
+
+	return ignorePatterns, urlPatterns
+}
+
+// CollectURLsV2 is the improved version with better pattern matching and directory skipping
+func CollectURLsV2(rootPath string, globs []string, respectGitignore bool, ignorePatterns []string, slURLPatterns []string) (map[string][]string, error) {
+	if strings.TrimSpace(rootPath) == "" {
+		rootPath = "."
+	}
+	cleanRoot := filepath.Clean(rootPath)
+
+	st, _ := os.Stat(cleanRoot)
+	isFileRoot := st != nil && !st.IsDir()
+
+	// Add standard ignore patterns
+	if respectGitignore {
+		ignorePatterns = append(ignorePatterns, "**/.git/**")
+	}
+	ignorePatterns = append(ignorePatterns, "**/.slinkignore")
+
+	if isDebugEnv() {
+		fmt.Printf("::debug:: Include patterns: %v\n", globs)
+		fmt.Printf("::debug:: Ignore patterns: %v\n", ignorePatterns)
+	}
+
+	urlToFiles := make(map[string]map[string]struct{})
+
+	// 2 MiB max file size to avoid huge/binary files
+	const maxSize = 2 * 1024 * 1024
+
+	// Walk the filesystem
+	walkFn := func(path string, d os.DirEntry, err error) error {
+		if isDebugEnv() {
+			fmt.Printf("::debug:: Walking path: %s\n", path)
+		}
+
+		if err != nil {
+			return nil
+		}
+
+		rel, rerr := filepath.Rel(cleanRoot, path)
+		if rerr != nil {
+			rel = path
+		}
+		rel = filepath.ToSlash(rel)
+
+		// Handle directories
+		if d.IsDir() {
+			base := filepath.Base(path)
+			if base == ".git" {
+				return filepath.SkipDir
+			}
+
+			// Check if this directory should be skipped entirely
+			if shouldSkipDirectory(rel, ignorePatterns) {
+				if isDebugEnv() {
+					fmt.Printf("::debug:: Skipping directory: %s\n", rel)
+				}
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Check if file should be ignored
+		shouldIgnore := false
+		for _, pattern := range ignorePatterns {
+			if ok, _ := doublestar.PathMatch(pattern, rel); ok {
+				shouldIgnore = true
+				break
+			}
+		}
+
+		if shouldIgnore {
+			if isDebugEnv() {
+				fmt.Printf("::debug:: Ignoring file: %s\n", rel)
+			}
+			return nil
+		}
+
+		// Check if file should be included
+		shouldInclude := true
+		if len(globs) > 0 {
+			shouldInclude = false
+			for _, pattern := range globs {
+				if ok, _ := doublestar.PathMatch(pattern, rel); ok {
+					shouldInclude = true
+					break
+				}
+			}
+		}
+
+		if !shouldInclude {
+			return nil
+		}
+
+		info, ierr := d.Info()
+		if ierr != nil {
+			return nil
+		}
+		if info.Size() > maxSize {
+			return nil
+		}
+
+		// Read file and extract URLs
+		f, err := os.Open(path)
+		if err != nil {
+			return nil
+		}
+		defer f.Close()
+
+		content, err := io.ReadAll(f)
+		if err != nil {
+			return nil
+		}
+
+		// Extract URLs using the existing logic
+		matches := extractCandidateMatches(string(content))
+		for _, m := range matches {
+			u := sanitizeURLToken(m.URL)
+			if u == "" {
+				continue
+			}
+			if isURLIgnored(u, slURLPatterns) {
+				continue
+			}
+			if urlToFiles[u] == nil {
+				urlToFiles[u] = make(map[string]struct{})
+			}
+			urlToFiles[u][rel] = struct{}{}
+		}
+
+		return nil
+	}
+
+	if isFileRoot {
+		// Single file
+		if err := walkFn(cleanRoot, nil, nil); err != nil {
+			return nil, err
+		}
+	} else {
+		// Directory
+		if err := filepath.WalkDir(cleanRoot, walkFn); err != nil {
+			return nil, err
+		}
+	}
+
+	// Convert to final format
+	result := make(map[string][]string)
+	for url, files := range urlToFiles {
+		var fileList []string
+		for f := range files {
+			fileList = append(fileList, f)
+		}
+		sort.Strings(fileList)
+		result[url] = fileList
+	}
+
+	return result, nil
 }
 
 // findSlinkyConfig searches upward from root for a .slinkignore file
