@@ -45,7 +45,7 @@ func init() {
 				}
 			}
 
-			return tui.Run(root, gl, cfg, jsonOut, mdOut)
+			return tui.Run(root, gl, cfg, jsonOut, mdOut, watchMode)
 		},
 	}
 
@@ -53,6 +53,7 @@ func init() {
 	runCmd.Flags().StringVar(&jsonOut, "json-out", "", "path to write full JSON results (array)")
 	runCmd.Flags().StringVar(&mdOut, "md-out", "", "path to write Markdown report for PR comment")
 	runCmd.Flags().StringVar(&repoBlobBase, "repo-blob-base", "", "override GitHub blob base URL (e.g. https://github.com/owner/repo/blob/<sha>)")
+	runCmd.Flags().BoolVar(&watchMode, "watch", false, "watch for file changes and automatically re-scan")
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -60,4 +61,5 @@ var (
 	maxConcurrency int
 	jsonOut        string
 	mdOut          string
+	watchMode      bool
 )

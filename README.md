@@ -36,6 +36,7 @@ jobs:
 - **fail-on-failures**: Fail job on any broken links. Default: `true`
 - **comment-pr**: Post Markdown as a PR comment when applicable. Default: `true`
 - **step-summary**: Append report to the job summary. Default: `true`
+- **watch**: Watch for file changes and automatically re-scan (CLI only). Default: `false`
 
 ### Output links in PRs
 
@@ -58,11 +59,49 @@ slinky check ./docs/**/* ./markdown/**/*
 
 # TUI mode: same targets
 slinky run **/*
+
+# Watch mode: automatically re-scan on file changes
+slinky run --watch **/*
 ```
 
 Notes:
 - Targets can be files, directories, or doublestar globs. Multiple targets are allowed.
 - If no targets are provided, the default is `**/*` relative to the current working directory.
+- Watch mode monitors file changes and automatically re-scans when files are modified.
+
+### Watch Mode
+
+Watch mode provides real-time link checking by monitoring file changes and automatically re-scanning when files are modified. This is particularly useful during development when you want to ensure links remain valid as you edit files.
+
+**Features:**
+- **Automatic Re-scanning**: Detects file changes and triggers new scans automatically
+- **Sequential Processing**: Completes file scanning before starting URL checking for accurate counts
+- **Real-time Updates**: Shows live progress as files are scanned and URLs are checked
+- **Configuration Monitoring**: Watches `.slinkignore` files and re-scans when configuration changes
+- **Clean State Management**: Each re-scan starts with a fresh state and accurate file counts
+
+**Usage:**
+```bash
+# Watch all files in current directory
+slinky run --watch
+
+# Watch specific directories or files
+slinky run --watch docs/ README.md
+
+# Watch with glob patterns
+slinky run --watch "**/*.md" "**/*.yaml"
+```
+
+**Controls:**
+- `q` or `Ctrl+C`: Quit watch mode
+- `f`: Toggle display of failed links only
+
+**How it works:**
+1. **Initial Scan**: Performs a complete scan of all target files
+2. **File Monitoring**: Watches for changes to files matching the target patterns
+3. **Configuration Monitoring**: Also watches `.slinkignore` files for configuration changes
+4. **Automatic Re-scan**: When changes are detected, cancels the current scan and starts a fresh one
+5. **Clean Restart**: Each re-scan resets counters and provides accurate file counts
 
 ### Notes
 

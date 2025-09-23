@@ -68,11 +68,25 @@ func CheckURLs(ctx context.Context, urls []string, sources map[string][]string, 
 				ok = true
 				err = nil
 			}
+			// Check context before sending result
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			var srcs []string
 			if sources != nil {
 				srcs = sources[j.url]
 			}
-			out <- Result{URL: j.url, OK: ok, Status: status, Err: err, ErrMsg: errString(err), Method: http.MethodGet, Sources: cloneAndSort(srcs)}
+
+			// Send result with context check
+			select {
+			case out <- Result{URL: j.url, OK: ok, Status: status, Err: err, ErrMsg: errString(err), Method: http.MethodGet, Sources: cloneAndSort(srcs)}:
+			case <-ctx.Done():
+				return
+			}
+
 			processed++
 			pending--
 			if stats != nil {

@@ -162,7 +162,10 @@ func WriteMarkdown(path string, results []web.Result, s Summary) (string, error)
 			if strings.TrimSpace(s.RepoBlobBaseURL) != "" {
 				buf.WriteString(fmt.Sprintf("  - [%s](%s/%s)\n", escapeMD(display), strings.TrimRight(s.RepoBlobBaseURL, "/"), linkPath))
 			} else {
-				buf.WriteString(fmt.Sprintf("  - [%s](./%s)\n", escapeMD(display), linkPath))
+				// For local file links, the file paths in Sources are already relative to the working directory
+				// They are computed by the merge function in check.go which combines the target directory with the relative file path
+				// So we can use the linkPath directly
+				buf.WriteString(fmt.Sprintf("  - [%s](%s)\n", escapeMD(display), linkPath))
 			}
 		}
 	}

@@ -10,11 +10,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/fsnotify/fsnotify"
 
 	"slinky/internal/report"
 	"slinky/internal/web"
@@ -26,13 +28,16 @@ type statsMsg struct{ s web.Stats }
 type tickMsg struct{ t time.Time }
 
 type fileScannedMsg struct{ rel string }
+type fileChangedMsg struct{ path string }
+type watchErrorMsg struct{ err error }
 
 type model struct {
-	rootPath string
-	cfg      web.Config
-	jsonOut  string
-	mdOut    string
-	globs    []string
+	rootPath  string
+	cfg       web.Config
+	jsonOut   string
+	mdOut     string
+	globs     []string
+	watchMode bool
 
 	results    chan web.Result
 	stats      chan web.Stats
@@ -64,11 +69,21 @@ type model struct {
 	mdPath     string
 
 	showFail bool
+
+	// Context for canceling scans
+	scanCtx    context.Context
+	scanCancel context.CancelFunc
+
+	// Flag to prevent file counting after scan is done
+	scanDone bool
+
+	// Channel to signal when scan is completely done
+	scanComplete chan struct{}
 }
 
 // Run scans files under rootPath matching globs, extracts URLs, and checks them.
-func Run(rootPath string, globs []string, cfg web.Config, jsonOut string, mdOut string) error {
-	m := &model{rootPath: rootPath, cfg: cfg, jsonOut: jsonOut, mdOut: mdOut, globs: globs}
+func Run(rootPath string, globs []string, cfg web.Config, jsonOut string, mdOut string, watchMode bool) error {
+	m := &model{rootPath: rootPath, cfg: cfg, jsonOut: jsonOut, mdOut: mdOut, globs: globs, watchMode: watchMode}
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	return p.Start()
 }
@@ -80,30 +95,186 @@ func (m *model) Init() tea.Cmd {
 	m.prog = progress.New(progress.WithDefaultGradient())
 	m.started = time.Now()
 	m.lowRPS = -1
+	m.scanDone = false
+	m.scanComplete = make(chan struct{})
 	m.results = make(chan web.Result, 256)
 	m.stats = make(chan web.Stats, 64)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		defer cancel()
-		urlsMap, _ := fsCollectProgress(m.rootPath, m.globs, func(rel string) {
-			m.filesScanned++
-			// Emit a short event line per file to show activity
-			m.lines = append(m.lines, fmt.Sprintf("📄 %s", rel))
-			m.refreshViewport()
-		})
-		var urls []string
-		for u := range urlsMap {
-			urls = append(urls, u)
-		}
-		web.CheckURLs(ctx, urls, urlsMap, m.results, m.stats, m.cfg)
-	}()
+	// Start initial scan
+	m.startScan()
+
+	// Start file watcher if in watch mode
+	if m.watchMode {
+		return tea.Batch(m.spin.Tick, m.waitForEvent(), tickCmd(), m.startWatcher())
+	}
 
 	return tea.Batch(m.spin.Tick, m.waitForEvent(), tickCmd())
 }
 
 func tickCmd() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg{t: t} })
+}
+
+func (m *model) startScan() {
+	// Cancel previous scan if it exists
+	if m.scanCancel != nil {
+		m.scanCancel()
+	}
+
+	// Create new context for this scan
+	m.scanCtx, m.scanCancel = context.WithCancel(context.Background())
+	m.scanComplete = make(chan struct{})
+
+	go func() {
+		defer func() {
+			m.scanCancel()
+			// Signal that scan is completely done
+			if m.scanComplete != nil {
+				close(m.scanComplete)
+			}
+		}()
+
+		// Phase 1: Complete file scanning first
+		select {
+		case <-m.scanCtx.Done():
+			return
+		default:
+		}
+
+		m.lines = append(m.lines, "🔍 Scanning files...")
+		m.refreshViewport()
+
+		urlsMap, _ := fsCollectProgress(m.rootPath, m.globs, func(rel string) {
+			// Check context before processing each file
+			select {
+			case <-m.scanCtx.Done():
+				return
+			default:
+			}
+			m.filesScanned++
+			// Emit a short event line per file to show activity
+			m.lines = append(m.lines, fmt.Sprintf("📄 %s", rel))
+			m.refreshViewport()
+		})
+
+		// File scanning is complete - set the flag
+		m.scanDone = true
+		m.lines = append(m.lines, fmt.Sprintf("✅ File scanning complete: %d files scanned", m.filesScanned))
+		m.refreshViewport()
+
+		// Check context before starting URL checking
+		select {
+		case <-m.scanCtx.Done():
+			return
+		default:
+		}
+
+		// Phase 2: Now start URL checking
+		m.lines = append(m.lines, "🌐 Checking URLs...")
+		m.refreshViewport()
+
+		var urls []string
+		for u := range urlsMap {
+			urls = append(urls, u)
+		}
+		web.CheckURLs(m.scanCtx, urls, urlsMap, m.results, m.stats, m.cfg)
+	}()
+}
+
+func (m *model) findSlinkyConfig(root string) string {
+	cur := root
+	for {
+		cfg := filepath.Join(cur, ".slinkignore")
+		if st, err := os.Stat(cfg); err == nil && !st.IsDir() {
+			return cfg
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur || strings.TrimSpace(parent) == "" {
+			break
+		}
+		cur = parent
+	}
+	return ""
+}
+
+func (m *model) startWatcher() tea.Cmd {
+	return func() tea.Msg {
+		watcher, err := fsnotify.NewWatcher()
+		if err != nil {
+			return watchErrorMsg{err: err}
+		}
+		defer watcher.Close()
+
+		// Add the root path and all subdirectories to the watcher
+		err = filepath.Walk(m.rootPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				return watcher.Add(path)
+			}
+			return nil
+		})
+		if err != nil {
+			return watchErrorMsg{err: err}
+		}
+
+		// Also watch for .slinkignore files by searching upward from root
+		slinkignorePath := m.findSlinkyConfig(m.rootPath)
+		if slinkignorePath != "" {
+			// Watch the directory containing the .slinkignore file
+			slinkignoreDir := filepath.Dir(slinkignorePath)
+			if err := watcher.Add(slinkignoreDir); err != nil {
+				// If we can't watch the .slinkignore directory, continue without it
+				// This is not a critical error
+			}
+		}
+
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return nil
+				}
+				// Only watch for write events (file modifications)
+				if event.Op&fsnotify.Write == fsnotify.Write {
+					// Check if it's a .slinkignore file change
+					if filepath.Base(event.Name) == ".slinkignore" {
+						return fileChangedMsg{path: event.Name}
+					}
+
+					// Check if the file matches our glob patterns
+					rel, err := filepath.Rel(m.rootPath, event.Name)
+					if err != nil {
+						continue
+					}
+					rel = filepath.ToSlash(rel)
+
+					// Check if the file matches any of our glob patterns
+					matches := false
+					if len(m.globs) == 0 {
+						matches = true
+					} else {
+						for _, pattern := range m.globs {
+							if matched, _ := doublestar.PathMatch(pattern, rel); matched {
+								matches = true
+								break
+							}
+						}
+					}
+
+					if matches {
+						return fileChangedMsg{path: event.Name}
+					}
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return nil
+				}
+				return watchErrorMsg{err: err}
+			}
+		}
+	}
 }
 
 func (m *model) waitForEvent() tea.Cmd {
@@ -128,10 +299,59 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
+			// Clean up resources before quitting
+			if m.scanCancel != nil {
+				m.scanCancel()
+			}
 			return m, tea.Quit
 		case "f":
 			m.showFail = !m.showFail
 			m.refreshViewport()
+			return m, nil
+		case "r":
+			// Manual rescan - only available when scan is done
+			if m.done {
+				m.lines = append(m.lines, "🔄 Manual rescan triggered")
+				m.refreshViewport()
+
+				// Cancel previous scan and wait for cleanup
+				if m.scanCancel != nil {
+					m.scanCancel()
+					// Wait for the previous scan to completely finish
+					if m.scanComplete != nil {
+						select {
+						case <-m.scanComplete:
+							// Previous scan is done
+						case <-time.After(2 * time.Second):
+							// Timeout after 2 seconds
+						}
+					}
+				}
+
+				// Reset counters and start new scan
+				m.total = 0
+				m.ok = 0
+				m.fail = 0
+				m.processed = 0
+				m.lastProcessed = 0
+				m.filesScanned = 0
+				m.allResults = nil
+				m.started = time.Now()
+				m.finishedAt = time.Time{}
+				m.done = false
+				m.scanDone = false
+				m.results = make(chan web.Result, 256)
+				m.stats = make(chan web.Stats, 64)
+
+				// Clear the lines to start fresh (but keep the rescan notification)
+				rescanLine := m.lines[len(m.lines)-1] // Keep the last line (the rescan notification)
+				m.lines = []string{rescanLine}
+				// Reset viewport to prevent slice bounds error
+				m.vp.SetContent("")
+				m.vp.GotoTop()
+				m.startScan()
+				return m, m.waitForEvent()
+			}
 			return m, nil
 		}
 	case tea.WindowSizeMsg:
@@ -188,7 +408,62 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.results = nil
 		m.writeJSON()
 		m.writeMarkdown()
+		if m.watchMode {
+			// In watch mode, don't quit, just wait for more changes
+			return m, m.startWatcher()
+		}
 		return m, tea.Quit
+	case fileChangedMsg:
+		// File changed, restart the scan
+		fileName := filepath.Base(msg.path)
+		if fileName == ".slinkignore" {
+			m.lines = append(m.lines, fmt.Sprintf("⚙️  .slinkignore changed: %s", msg.path))
+		} else {
+			m.lines = append(m.lines, fmt.Sprintf("🔄 File changed: %s", msg.path))
+		}
+		m.refreshViewport()
+
+		// Cancel previous scan and wait for cleanup
+		if m.scanCancel != nil {
+			m.scanCancel()
+			// Wait for the previous scan to completely finish
+			if m.scanComplete != nil {
+				select {
+				case <-m.scanComplete:
+					// Previous scan is done
+				case <-time.After(2 * time.Second):
+					// Timeout after 2 seconds
+				}
+			}
+		}
+
+		// Reset counters and start new scan
+		m.total = 0
+		m.ok = 0
+		m.fail = 0
+		m.processed = 0
+		m.lastProcessed = 0
+		m.filesScanned = 0
+		m.allResults = nil
+		m.started = time.Now()
+		m.finishedAt = time.Time{}
+		m.done = false
+		m.scanDone = false
+		m.results = make(chan web.Result, 256)
+		m.stats = make(chan web.Stats, 64)
+
+		// Clear the lines to start fresh (but keep the change notification)
+		changeLine := m.lines[len(m.lines)-1] // Keep the last line (the change notification)
+		m.lines = []string{changeLine}
+		// Reset viewport to prevent slice bounds error
+		m.vp.SetContent("")
+		m.vp.GotoTop()
+		m.startScan()
+		return m, m.waitForEvent()
+	case watchErrorMsg:
+		m.lines = append(m.lines, fmt.Sprintf("❌ Watch error: %v", msg.err))
+		m.refreshViewport()
+		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -274,7 +549,11 @@ func (m *model) writeMarkdown() {
 }
 
 func (m *model) View() string {
-	header := lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf(" Scanning %s ", m.rootPath))
+	headerText := fmt.Sprintf(" Scanning %s ", m.rootPath)
+	if m.watchMode {
+		headerText = fmt.Sprintf(" Scanning %s (WATCH MODE) ", m.rootPath)
+	}
+	header := lipgloss.NewStyle().Bold(true).Render(headerText)
 	if m.done {
 		dur := time.Since(m.started)
 		if !m.finishedAt.IsZero() {
@@ -296,7 +575,8 @@ func (m *model) View() string {
 		if m.mdPath != "" {
 			summary = append(summary, fmt.Sprintf("Markdown: %s", m.mdPath))
 		}
-		footer := lipgloss.NewStyle().Faint(true).Render("Controls: [q] quit  [f] toggle fails")
+		footerText := "Controls: [q] quit  [f] toggle fails  [r] rescan"
+		footer := lipgloss.NewStyle().Faint(true).Render(footerText)
 		container := lipgloss.NewStyle().Padding(1)
 		return container.Render(strings.Join(append([]string{header}, append(summary, footer)...), "\n"))
 	}
@@ -308,7 +588,8 @@ func (m *model) View() string {
 	progressLine := m.prog.ViewAs(percent)
 	stats := fmt.Sprintf("%s  total:%d  ok:%d  fail:%d  pending:%d processed:%d  rps:%.1f/s  files:%d", m.spin.View(), m.total, m.ok, m.fail, m.pending, m.processed, m.rps, m.filesScanned)
 	body := m.vp.View()
-	footer := lipgloss.NewStyle().Faint(true).Render("Controls: [q] quit  [f] toggle fails")
+	footerText := "Controls: [q] quit  [f] toggle fails"
+	footer := lipgloss.NewStyle().Faint(true).Render(footerText)
 	container := lipgloss.NewStyle().Padding(1)
 	return container.Render(strings.Join([]string{header, stats, progressLine, "", body, footer}, "\n"))
 }

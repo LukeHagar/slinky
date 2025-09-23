@@ -377,7 +377,13 @@ func CollectURLsProgressWithIgnoreConfig(rootPath string, globs []string, respec
 		if err != nil {
 			return nil
 		}
-		rel, rerr := filepath.Rel(cleanRoot, path)
+		// Compute relative path from current working directory, not from cleanRoot
+		// This ensures file paths in the report are relative to where the command was run
+		wd, wderr := os.Getwd()
+		if wderr != nil {
+			wd = "."
+		}
+		rel, rerr := filepath.Rel(wd, path)
 		if rerr != nil {
 			rel = path
 		}
@@ -934,7 +940,13 @@ func CollectURLsV2(rootPath string, globs []string, respectGitignore bool, ignor
 			return nil
 		}
 
-		rel, rerr := filepath.Rel(cleanRoot, path)
+		// Compute relative path from current working directory, not from cleanRoot
+		// This ensures file paths in the report are relative to where the command was run
+		wd, wderr := os.Getwd()
+		if wderr != nil {
+			wd = "."
+		}
+		rel, rerr := filepath.Rel(wd, path)
 		if rerr != nil {
 			rel = path
 		}
