@@ -32,7 +32,7 @@ inputs:
     description: "Fail the job if any links fail"
     required: false
   comment_pr:
-    description: "If running on a PR, post a comment with the report"
+    description: "If running on a PR, post a comment with the report. Default: true (enabled when GITHUB_TOKEN is present)"
     required: false
   step_summary:
     description: "Append the report to the GitHub Step Summary"

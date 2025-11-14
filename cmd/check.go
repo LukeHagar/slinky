@@ -317,11 +317,14 @@ func init() {
 			}
 
 			// If running on a PR, post or update the comment(s), chunking as needed
-			// Check if PR commenting is enabled (default to true if not set)
-			commentPR := true
+			// PR comments are enabled by default when token is present
+			// Only disable if explicitly set to "false"
+			commentPR := true // Default: enabled
 			if val := os.Getenv("INPUT_COMMENT_PR"); val != "" {
-				commentPR = strings.EqualFold(val, "true")
+				// Explicitly check for "false" to disable, everything else enables
+				commentPR = !strings.EqualFold(strings.TrimSpace(val), "false")
 			}
+			// Only post comments if: GitHub PR detected, commenting enabled, and report exists
 			if ghOK && commentPR && strings.TrimSpace(finalMDPath) != "" {
 				b, rerr := os.ReadFile(finalMDPath)
 				if rerr != nil {
