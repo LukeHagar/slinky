@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -18,6 +19,7 @@ type CacheEntry struct {
 
 // URLCache manages URL result caching
 type URLCache struct {
+	mu      sync.RWMutex
 	entries map[string]CacheEntry
 	ttl     time.Duration
 	path    string
@@ -57,6 +59,8 @@ func (c *URLCache) Load() error {
 	}
 	
 	now := time.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.entries = make(map[string]CacheEntry, len(entries))
 	for _, entry := range entries {
 		// Only load entries that haven't expired
@@ -70,14 +74,18 @@ func (c *URLCache) Load() error {
 
 // Get retrieves a cached result for a URL
 func (c *URLCache) Get(url string) (CacheEntry, bool) {
+	c.mu.RLock()
 	entry, ok := c.entries[url]
+	c.mu.RUnlock()
 	if !ok {
 		return CacheEntry{}, false
 	}
 	
 	// Check if entry has expired
 	if time.Since(entry.Checked) >= c.ttl {
+		c.mu.Lock()
 		delete(c.entries, url)
+		c.mu.Unlock()
 		return CacheEntry{}, false
 	}
 	
@@ -86,6 +94,8 @@ func (c *URLCache) Get(url string) (CacheEntry, bool) {
 
 // Set stores a result in the cache
 func (c *URLCache) Set(url string, ok bool, status int, errMsg string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.entries[url] = CacheEntry{
 		URL:     url,
 		OK:      ok,
@@ -102,10 +112,12 @@ func (c *URLCache) Save() error {
 	}
 	
 	// Convert map to slice for JSON serialization
+	c.mu.RLock()
 	entries := make([]CacheEntry, 0, len(c.entries))
 	for _, entry := range c.entries {
 		entries = append(entries, entry)
 	}
+	c.mu.RUnlock()
 	
 	data, err := json.MarshalIndent(entries, "", "  ")
 	if err != nil {
@@ -127,6 +139,8 @@ func (c *URLCache) Save() error {
 
 // Clear removes all entries from the cache
 func (c *URLCache) Clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.entries = make(map[string]CacheEntry)
 }
 

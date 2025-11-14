@@ -38,12 +38,18 @@ func CheckURLs(ctx context.Context, urls []string, sources map[string][]string, 
 	jobs := make(chan job, len(urls))
 	done := make(chan struct{})
 
+	// Use atomic counters to avoid race conditions
+	var processed int64
+	var pending int64
+	var jobCount int64
+
 	// Seed jobs (URLs are already deduplicated in check.go, so no need to deduplicate here)
 	for _, u := range urls {
 		if u == "" {
 			continue
 		}
 		jobs <- job{url: u}
+		jobCount++
 	}
 	close(jobs)
 
@@ -51,9 +57,8 @@ func CheckURLs(ctx context.Context, urls []string, sources map[string][]string, 
 	if concurrency <= 0 {
 		concurrency = 8
 	}
-	// Use atomic counters to avoid race conditions
-	var processed int64
-	var pending int64 = int64(len(urls))
+	// Set pending to actual number of jobs enqueued
+	pending = jobCount
 
 	worker := func() {
 		for j := range jobs {
