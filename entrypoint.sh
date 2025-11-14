@@ -13,37 +13,43 @@ elif [ -n "${GITHUB_REPOSITORY:-}" ]; then
   [ -n "$COMMIT_SHA" ] && export SLINKY_REPO_BLOB_BASE_URL="https://github.com/${GITHUB_REPOSITORY}/blob/${COMMIT_SHA}"
 fi
 
-# Build slinky command arguments
-ARGS="check"
+# Build slinky command arguments using set -- for proper argument handling
+set -- check
 
-# Optional flags
-[ -n "${INPUT_CONCURRENCY:-}" ] && ARGS="$ARGS --concurrency ${INPUT_CONCURRENCY}"
-[ -n "${INPUT_TIMEOUT:-}" ] && ARGS="$ARGS --timeout ${INPUT_TIMEOUT}"
-[ -n "${INPUT_JSON_OUT:-}" ] && ARGS="$ARGS --json-out ${INPUT_JSON_OUT}"
-[ -n "${INPUT_MD_OUT:-}" ] && ARGS="$ARGS --md-out ${INPUT_MD_OUT}"
-[ -n "${INPUT_REPO_BLOB_BASE:-}" ] && ARGS="$ARGS --repo-blob-base ${INPUT_REPO_BLOB_BASE}"
+# Optional flags (properly quoted to handle spaces)
+[ -n "${INPUT_CONCURRENCY:-}" ] && set -- "$@" --concurrency "${INPUT_CONCURRENCY}"
+[ -n "${INPUT_TIMEOUT:-}" ] && set -- "$@" --timeout "${INPUT_TIMEOUT}"
+[ -n "${INPUT_JSON_OUT:-}" ] && set -- "$@" --json-out "${INPUT_JSON_OUT}"
+[ -n "${INPUT_MD_OUT:-}" ] && set -- "$@" --md-out "${INPUT_MD_OUT}"
+[ -n "${INPUT_REPO_BLOB_BASE:-}" ] && set -- "$@" --repo-blob-base "${INPUT_REPO_BLOB_BASE}"
 
 # Boolean flags with defaults
-[ "${INPUT_FAIL_ON_FAILURES:-true}" = "true" ] && ARGS="$ARGS --fail-on-failures=true" || ARGS="$ARGS --fail-on-failures=false"
-[ "${INPUT_RESPECT_GITIGNORE:-true}" = "true" ] && ARGS="$ARGS --respect-gitignore=true" || ARGS="$ARGS --respect-gitignore=false"
+[ "${INPUT_FAIL_ON_FAILURES:-true}" = "true" ] && set -- "$@" --fail-on-failures=true || set -- "$@" --fail-on-failures=false
+[ "${INPUT_RESPECT_GITIGNORE:-true}" = "true" ] && set -- "$@" --respect-gitignore=true || set -- "$@" --respect-gitignore=false
 
 # Add targets (comma-separated glob patterns)
 if [ -n "${INPUT_TARGETS:-}" ]; then
   IFS=','
   for target in $INPUT_TARGETS; do
     target=$(echo "$target" | xargs)
-    [ -n "$target" ] && ARGS="$ARGS $target"
+    [ -n "$target" ] && set -- "$@" "$target"
   done
   unset IFS
 else
-  ARGS="$ARGS **/*"
+  set -- "$@" "**/*"
 fi
 
 # Debug output
-[ "${ACTIONS_STEP_DEBUG:-}" = "true" ] && printf "::debug:: Running: slinky %s\n" "$ARGS"
+if [ "${ACTIONS_STEP_DEBUG:-}" = "true" ]; then
+  printf "::debug:: Running: slinky"
+  for arg in "$@"; do
+    printf " %s" "$arg"
+  done
+  printf "\n"
+fi
 
 # Execute slinky (crawl repo with glob input, filter via .slinkignore)
-slinky $ARGS
+slinky "$@"
 EXIT_CODE=$?
 
 # Expose outputs
