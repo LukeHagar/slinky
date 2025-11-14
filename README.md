@@ -21,12 +21,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run Slinky
         uses: LukeHagar/slinky@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Required for PR comments
         with:
           targets: "docs/,README.md,**/*.md"
-          # comment-pr: true  # Optional: post results as PR comment (requires GITHUB_TOKEN)
+          # comment-pr: true  # Optional: post results as PR comment (default: true)
 ```
 
-**Note:** The `GITHUB_TOKEN` is automatically provided by GitHub Actions and is only required for PR comment functionality. Core link checking works without it. If you disable PR comments (`comment-pr: false`), you can remove the `pull-requests: write` permission.
+**Note:** The `GITHUB_TOKEN` is automatically provided by GitHub Actions via `secrets.GITHUB_TOKEN` and is only required for PR comment functionality. Core link checking works without it. If you disable PR comments (`comment-pr: false`), you can remove the `pull-requests: write` permission and the `GITHUB_TOKEN` env variable.
 
 ### Inputs
 
