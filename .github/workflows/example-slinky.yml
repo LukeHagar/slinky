@@ -15,10 +15,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run Slinky link checker
+      - name: Run Slinky link checker (Example - failures won't block)
         uses: ./
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          fail-on-failures: false  # Disable blocking failures for example/demo purposes
+          comment-pr: true  # Enable PR comments to showcase the feature
+          md-out: results.md
+          json-out: results.json
 
       - name: Upload results
         if: always()
