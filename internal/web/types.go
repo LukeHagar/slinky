@@ -26,4 +26,5 @@ type Config struct {
 	RequestTimeout time.Duration
 	MaxRetries429  int
 	Exclude        []string
+	Cache          *URLCache // Optional URL result cache
 }

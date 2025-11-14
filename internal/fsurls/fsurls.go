@@ -1,7 +1,6 @@
 package fsurls
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -247,22 +246,14 @@ func CollectURLsWithIgnoreConfig(rootPath string, globs []string, respectGitigno
 			return nil
 		}
 		defer f.Close()
-		br := bufio.NewReader(f)
-		// Read up to maxSize bytes
-		var b strings.Builder
-		read := int64(0)
-		for {
-			chunk, cerr := br.ReadString('\n')
-			b.WriteString(chunk)
-			read += int64(len(chunk))
-			if cerr == io.EOF || read > maxSize {
-				break
-			}
-			if cerr != nil {
-				break
-			}
+		// Read up to maxSize bytes efficiently using LimitReader
+		limitedReader := io.LimitReader(f, maxSize)
+		contentBytes, readErr := io.ReadAll(limitedReader)
+		if readErr != nil {
+			// Non-critical error: skip file and continue
+			return nil
 		}
-		content := b.String()
+		content := string(contentBytes)
 		// Skip if likely binary (NUL present)
 		if strings.IndexByte(content, '\x00') >= 0 {
 			return nil
@@ -428,21 +419,14 @@ func CollectURLsProgressWithIgnoreConfig(rootPath string, globs []string, respec
 			return nil
 		}
 		defer f.Close()
-		br := bufio.NewReader(f)
-		var b strings.Builder
-		read := int64(0)
-		for {
-			chunk, cerr := br.ReadString('\n')
-			b.WriteString(chunk)
-			read += int64(len(chunk))
-			if cerr == io.EOF || read > maxSize {
-				break
-			}
-			if cerr != nil {
-				break
-			}
+		// Read up to maxSize bytes efficiently using LimitReader
+		limitedReader := io.LimitReader(f, maxSize)
+		contentBytes, readErr := io.ReadAll(limitedReader)
+		if readErr != nil {
+			// Non-critical error: skip file and continue
+			return nil
 		}
-		content := b.String()
+		content := string(contentBytes)
 		if strings.IndexByte(content, '\x00') >= 0 {
 			return nil
 		}

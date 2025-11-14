@@ -7,7 +7,9 @@ COPY . .
 RUN CGO_ENABLED=0 go build -o /usr/local/bin/slinky ./
 
 FROM alpine:3.20
-RUN apk add --no-cache curl jq ca-certificates
+# jq is used in entrypoint.sh for parsing GitHub event JSON
+# ca-certificates is needed for HTTPS requests
+RUN apk add --no-cache jq ca-certificates
 COPY --from=build /usr/local/bin/slinky /usr/local/bin/slinky
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

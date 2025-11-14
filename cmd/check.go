@@ -158,9 +158,51 @@ func init() {
 				fmt.Printf("::debug:: Root: %s\n", displayRoot)
 			}
 
+			// Validate and clamp numeric inputs
+			if maxConcurrency < 1 {
+				maxConcurrency = 1
+			} else if maxConcurrency > 100 {
+				maxConcurrency = 100
+			}
+			if timeoutSeconds < 1 {
+				timeoutSeconds = 1
+			} else if timeoutSeconds > 300 {
+				timeoutSeconds = 300 // Max 5 minutes
+			}
+			
 			// Build config
 			timeout := time.Duration(timeoutSeconds) * time.Second
-			cfg := web.Config{MaxConcurrency: maxConcurrency, RequestTimeout: timeout}
+			
+			// Set up URL cache if cache path is provided via environment variable
+			var urlCache *web.URLCache
+			if cachePath := os.Getenv("SLINKY_CACHE_PATH"); cachePath != "" {
+				cacheTTL := 24 // Default 24 hours
+				if ttlStr := os.Getenv("SLINKY_CACHE_TTL_HOURS"); ttlStr != "" {
+					if ttl, err := time.ParseDuration(ttlStr + "h"); err == nil && ttl > 0 {
+						cacheTTL = int(ttl.Hours())
+					}
+				}
+				urlCache = web.NewURLCache(cachePath, cacheTTL)
+				if err := urlCache.Load(); err != nil {
+					if shouldDebug() {
+						fmt.Printf("::debug:: Failed to load cache: %v\n", err)
+					}
+				}
+				// Save cache when done
+				defer func() {
+					if err := urlCache.Save(); err != nil {
+						if shouldDebug() {
+							fmt.Printf("::debug:: Failed to save cache: %v\n", err)
+						}
+					}
+				}()
+			}
+			
+			cfg := web.Config{
+				MaxConcurrency: maxConcurrency,
+				RequestTimeout: timeout,
+				Cache:          urlCache,
+			}
 
 			// Prepare URL list
 			var urls []string
@@ -275,9 +317,16 @@ func init() {
 			}
 
 			// If running on a PR, post or update the comment(s), chunking as needed
-			if ghOK && strings.TrimSpace(finalMDPath) != "" {
+			// Check if PR commenting is enabled (default to true if not set)
+			commentPR := true
+			if val := os.Getenv("INPUT_COMMENT_PR"); val != "" {
+				commentPR = strings.EqualFold(val, "true")
+			}
+			if ghOK && commentPR && strings.TrimSpace(finalMDPath) != "" {
 				b, rerr := os.ReadFile(finalMDPath)
-				if rerr == nil {
+				if rerr != nil {
+					fmt.Printf("::warning:: Failed to read markdown report for PR comment: %v\n", rerr)
+				} else {
 					full := string(b)
 					if shouldDebug() {
 						fmt.Printf("::debug:: Report size (chars): %d\n", len(full))
@@ -286,7 +335,10 @@ func init() {
 					if shouldDebug() {
 						fmt.Printf("::debug:: Posting %d chunk(s)\n", len(chunks))
 					}
-					_ = upsertPRComments(ghRepo, ghPR, ghToken, chunks)
+					if err := upsertPRComments(ghRepo, ghPR, ghToken, chunks); err != nil {
+						// Non-critical error: log warning but don't fail the run
+						fmt.Printf("::warning:: Failed to post PR comment: %v\n", err)
+					}
 				}
 			}
 
@@ -440,32 +492,52 @@ func chunkMarkdownByURL(body string) []string {
 }
 
 // upsertPRComments deletes any existing slinky comments and posts the new chunked comments in order.
+// Returns error if critical failures occur, but individual comment failures are logged and ignored.
 func upsertPRComments(repo string, prNumber int, token string, chunks []string) error {
 	apiBase := "https://api.github.com"
 	listURL := fmt.Sprintf("%s/repos/%s/issues/%d/comments?per_page=100", apiBase, repo, prNumber)
-	req, _ := http.NewRequest(http.MethodGet, listURL, nil)
+	req, err := http.NewRequest(http.MethodGet, listURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to list comments: %w", err)
 	}
 	defer resp.Body.Close()
+	
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("failed to list comments: HTTP %d", resp.StatusCode)
+	}
+	
 	var comments []struct {
 		ID   int    `json:"id"`
 		Body string `json:"body"`
 	}
-	b, _ := io.ReadAll(resp.Body)
-	_ = json.Unmarshal(b, &comments)
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read comments response: %w", err)
+	}
+	if err := json.Unmarshal(b, &comments); err != nil {
+		// Non-critical: continue even if we can't parse existing comments
+		if shouldDebug() {
+			fmt.Printf("::debug:: Failed to parse comments: %v\n", err)
+		}
+	}
 
 	// Delete all existing slinky-report comments to avoid stale entries
 	for _, c := range comments {
 		if strings.Contains(c.Body, "<!-- slinky-report -->") {
 			delURL := fmt.Sprintf("%s/repos/%s/issues/comments/%d", apiBase, repo, c.ID)
-			dReq, _ := http.NewRequest(http.MethodDelete, delURL, nil)
+			dReq, err := http.NewRequest(http.MethodDelete, delURL, nil)
+			if err != nil {
+				continue // Skip if we can't create request
+			}
 			dReq.Header.Set("Authorization", "Bearer "+token)
 			dReq.Header.Set("Accept", "application/vnd.github+json")
-			_, _ = http.DefaultClient.Do(dReq)
+			_, _ = http.DefaultClient.Do(dReq) // Non-critical: ignore delete errors
 		}
 	}
 
@@ -473,14 +545,39 @@ func upsertPRComments(repo string, prNumber int, token string, chunks []string) 
 	for idx, chunk := range chunks {
 		body := fmt.Sprintf("%s\n%s", "<!-- slinky-report -->", chunk)
 		postURL := fmt.Sprintf("%s/repos/%s/issues/%d/comments", apiBase, repo, prNumber)
-		payload, _ := json.Marshal(map[string]string{"body": body})
-		req, _ = http.NewRequest(http.MethodPost, postURL, bytes.NewReader(payload))
+		payload, err := json.Marshal(map[string]string{"body": body})
+		if err != nil {
+			if shouldDebug() {
+				fmt.Printf("::debug:: Failed to marshal comment payload: %v\n", err)
+			}
+			continue
+		}
+		req, err := http.NewRequest(http.MethodPost, postURL, bytes.NewReader(payload))
+		if err != nil {
+			if shouldDebug() {
+				fmt.Printf("::debug:: Failed to create POST request: %v\n", err)
+			}
+			continue
+		}
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Accept", "application/vnd.github+json")
 		req.Header.Set("Content-Type", "application/json")
-		res, _ := http.DefaultClient.Do(req)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			if shouldDebug() {
+				fmt.Printf("::debug:: Failed to post chunk %d/%d: %v\n", idx+1, len(chunks), err)
+			}
+			continue
+		}
+		res.Body.Close()
+		if res.StatusCode >= 400 {
+			if shouldDebug() {
+				fmt.Printf("::debug:: Failed to post chunk %d/%d: HTTP %d\n", idx+1, len(chunks), res.StatusCode)
+			}
+			continue
+		}
 		if shouldDebug() {
-			fmt.Printf("::debug:: Posted chunk %d/%d: %v\n", idx+1, len(chunks), res)
+			fmt.Printf("::debug:: Posted chunk %d/%d successfully\n", idx+1, len(chunks))
 		}
 	}
 	return nil

@@ -16,14 +16,17 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: write  # Only needed if comment-pr is enabled
     steps:
       - uses: actions/checkout@v4
       - name: Run Slinky
         uses: LukeHagar/slinky@v1
         with:
           targets: "docs/,README.md,**/*.md"
+          # comment-pr: true  # Optional: post results as PR comment (requires GITHUB_TOKEN)
 ```
+
+**Note:** The `GITHUB_TOKEN` is automatically provided by GitHub Actions and is only required for PR comment functionality. Core link checking works without it. If you disable PR comments (`comment-pr: false`), you can remove the `pull-requests: write` permission.
 
 ### Inputs
 
